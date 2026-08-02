@@ -1,0 +1,47 @@
+{
+  "name": "online-course-platform",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently \"node scripts/api-server.mjs\" \"vite\"",
+    "dev:api": "node scripts/api-server.mjs",
+    "build": "vite build",
+    "preview": "vite preview",
+    "lint": "tsc --noEmit",
+    "setup:check": "node setup.mjs check",
+    "setup:project": "node setup.mjs project",
+    "setup:db": "node setup.mjs db",
+    "setup:admin": "node setup.mjs admin",
+    "setup:deploy": "node setup.mjs deploy",
+    "setup:deploy-railway": "node setup.mjs deploy-railway",
+    "seed": "npx --yes tsx database/seed.ts",
+    "sounds:generate": "node scripts/generate-sounds.mjs",
+    "portal:rebrand": "node scripts/rebrand.mjs",
+    "portal:add-course": "node scripts/add-course.mjs",
+    "portal:verify-deploy": "node scripts/verify-deploy.mjs"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.105.4",
+    "@types/react-router-dom": "^5.3.3",
+    "canvas-confetti": "^1.9.4",
+    "date-fns": "3.3.1",
+    "lucide-react": "^0.562.0",
+    "papaparse": "5.4.1",
+    "react": "^19.2.3",
+    "react-dom": "^19.2.3",
+    "react-router-dom": "^7.15.0",
+    "resend": "^6.12.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.14.0",
+    "@vercel/node": "^5.8.0",
+    "@vitejs/plugin-react": "^5.0.0",
+    "autoprefixer": "^10.5.0",
+    "concurrently": "^9.1.0",
+    "postcss": "^8.5.14",
+    "tailwindcss": "^3.4.19",
+    "typescript": "~5.8.2",
+    "vite": "^6.2.0"
+  }
+}

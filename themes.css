@@ -1,0 +1,307 @@
+/* ============================================================
+   PORTAL THEMES — full design token system
+   Applied via [data-theme="..."] on <body>
+   ============================================================ */
+
+/* ── DEFAULT TOKENS (cyberpunk fallback) ──────────────────── */
+:root {
+  /* Background */
+  --theme-bg:           #050508;
+  --theme-surface:      #0a0a12;
+  --theme-surface-2:    #0e0e1a;
+  --theme-surface-3:    #13131f;
+  /* Border */
+  --theme-border:       rgba(255, 255, 255, 0.08);
+  --theme-border-soft:  rgba(255, 255, 255, 0.04);
+  /* Text */
+  --theme-text:         #e5e5e5;
+  --theme-text-muted:   #6b7280;
+  --theme-text-subtle:  #374151;
+  /* Accent overlay */
+  --theme-glow:         rgba(182, 255, 0, 0.10);
+  --theme-grid-color:   rgba(182, 255, 0, 0.04);
+  /* Header */
+  --theme-header-bg:    rgba(0, 0, 0, 0.70);
+  --theme-overlay:      rgba(0, 0, 0, 0.40);
+}
+
+/* ── 1. CYBERPUNK ─────────────────────────────────────────── */
+[data-theme="cyberpunk"] {
+  --theme-bg:           #050508;
+  --theme-surface:      #0a0a12;
+  --theme-surface-2:    #0e0e1a;
+  --theme-surface-3:    #13131f;
+  --theme-border:       rgba(182, 255, 0, 0.10);
+  --theme-border-soft:  rgba(182, 255, 0, 0.04);
+  --theme-text:         #e5e5e5;
+  --theme-text-muted:   #6b7280;
+  --theme-text-subtle:  #374151;
+  --theme-glow:         rgba(182, 255, 0, 0.12);
+  --theme-grid-color:   rgba(182, 255, 0, 0.035);
+  --theme-header-bg:    rgba(0, 0, 0, 0.75);
+  --theme-overlay:      rgba(0, 0, 0, 0.40);
+}
+
+/* ── 2. AURORA ───────────────────────────────────────────── */
+[data-theme="aurora"] {
+  --theme-bg:           #060812;
+  --theme-surface:      #0b0e1e;
+  --theme-surface-2:    #10142a;
+  --theme-surface-3:    #141830;
+  --theme-border:       rgba(99, 102, 241, 0.18);
+  --theme-border-soft:  rgba(99, 102, 241, 0.08);
+  --theme-text:         #e2e8f0;
+  --theme-text-muted:   #7c8db0;
+  --theme-text-subtle:  #3d4d6b;
+  --theme-glow:         rgba(99, 120, 255, 0.15);
+  --theme-grid-color:   rgba(120, 140, 255, 0.05);
+  --theme-header-bg:    rgba(6, 8, 18, 0.80);
+  --theme-overlay:      rgba(11, 14, 30, 0.50);
+}
+
+/* ── 3. CARBON ───────────────────────────────────────────── */
+[data-theme="carbon"] {
+  --theme-bg:           #0f1115;
+  --theme-surface:      #161a1f;
+  --theme-surface-2:    #1d2026;
+  --theme-surface-3:    #22262d;
+  --theme-border:       rgba(255, 255, 255, 0.08);
+  --theme-border-soft:  rgba(255, 255, 255, 0.04);
+  --theme-text:         #d1d5db;
+  --theme-text-muted:   #6b7280;
+  --theme-text-subtle:  #374151;
+  --theme-glow:         rgba(255, 255, 255, 0.04);
+  --theme-grid-color:   rgba(255, 255, 255, 0.04);
+  --theme-header-bg:    rgba(10, 12, 15, 0.80);
+  --theme-overlay:      rgba(0, 0, 0, 0.50);
+}
+
+/* ── 4. PAPER ────────────────────────────────────────────── */
+[data-theme="paper"] {
+  --theme-bg:           #fafaf8;
+  --theme-surface:      #ffffff;
+  --theme-surface-2:    #f0efeb;
+  --theme-surface-3:    #e8e6e1;
+  --theme-border:       rgba(0, 0, 0, 0.10);
+  --theme-border-soft:  rgba(0, 0, 0, 0.05);
+  --theme-text:         #111827;
+  --theme-text-muted:   #6b7280;
+  --theme-text-subtle:  #9ca3af;
+  --theme-glow:         rgba(0, 0, 0, 0.04);
+  --theme-grid-color:   rgba(0, 0, 0, 0.05);
+  --theme-header-bg:    rgba(255, 255, 255, 0.85);
+  --theme-overlay:      rgba(240, 238, 233, 0.70);
+}
+
+/* ── 5. SOLAR ────────────────────────────────────────────── */
+[data-theme="solar"] {
+  --theme-bg:           #0e0c08;
+  --theme-surface:      #1a1510;
+  --theme-surface-2:    #221c15;
+  --theme-surface-3:    #2a231b;
+  --theme-border:       rgba(251, 146, 60, 0.14);
+  --theme-border-soft:  rgba(251, 146, 60, 0.06);
+  --theme-text:         #e8dcc8;
+  --theme-text-muted:   #9a8060;
+  --theme-text-subtle:  #5a4535;
+  --theme-glow:         rgba(251, 146, 60, 0.12);
+  --theme-grid-color:   rgba(251, 146, 60, 0.04);
+  --theme-header-bg:    rgba(10, 8, 4, 0.80);
+  --theme-overlay:      rgba(20, 16, 10, 0.50);
+}
+
+/* ================================================================
+   SEMANTIC UTILITY CLASSES — dùng trong components
+   Tự động cập nhật khi theme thay đổi
+   ================================================================ */
+
+.t-surface   { background-color: var(--theme-surface) !important; }
+.t-surface-2 { background-color: var(--theme-surface-2) !important; }
+.t-surface-3 { background-color: var(--theme-surface-3) !important; }
+.t-border    { border-color: var(--theme-border) !important; }
+.t-text      { color: var(--theme-text) !important; }
+.t-text-muted { color: var(--theme-text-muted) !important; }
+.t-text-subtle { color: var(--theme-text-subtle) !important; }
+.t-overlay   { background-color: var(--theme-overlay) !important; }
+
+/* ================================================================
+   .portal-bg — background gradient + color cho portal container
+   ================================================================ */
+
+.portal-bg {
+  background-color: var(--theme-bg);
+  color: var(--theme-text);
+  transition: background-color 0.35s ease, background-image 0.35s ease;
+}
+
+body[data-theme="cyberpunk"] .portal-bg {
+  background-image:
+    radial-gradient(ellipse 80% 60% at -10% 110%, rgba(182,255,0,0.08) 0%, transparent 60%),
+    radial-gradient(ellipse 60% 50% at 110% -10%, rgba(80,255,180,0.04) 0%, transparent 50%),
+    linear-gradient(rgba(182,255,0,0.022) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(182,255,0,0.022) 1px, transparent 1px);
+  background-size: auto, auto, 40px 40px, 40px 40px;
+}
+
+body[data-theme="aurora"] .portal-bg {
+  background-image:
+    radial-gradient(ellipse 70% 50% at 20% 0%, rgba(99,102,241,0.18) 0%, transparent 55%),
+    radial-gradient(ellipse 60% 40% at 80% 100%, rgba(168,85,247,0.12) 0%, transparent 50%),
+    radial-gradient(ellipse 50% 30% at 50% 50%, rgba(56,189,248,0.06) 0%, transparent 60%),
+    radial-gradient(circle, rgba(120,140,255,0.05) 1px, transparent 1px);
+  background-size: auto, auto, auto, 28px 28px;
+}
+
+body[data-theme="carbon"] .portal-bg {
+  background-image:
+    radial-gradient(ellipse 100% 100% at 0% 0%, rgba(0,0,0,0.4) 0%, transparent 50%),
+    radial-gradient(ellipse 100% 100% at 100% 100%, rgba(0,0,0,0.35) 0%, transparent 50%),
+    radial-gradient(circle, rgba(255,255,255,0.042) 1px, transparent 1px),
+    radial-gradient(ellipse 60% 30% at 50% -5%, rgba(255,200,100,0.035) 0%, transparent 60%);
+  background-size: auto, auto, 24px 24px, auto;
+}
+
+body[data-theme="paper"] .portal-bg {
+  background-image:
+    radial-gradient(ellipse 80% 40% at 50% -5%, rgba(210,210,200,0.5) 0%, transparent 60%),
+    linear-gradient(rgba(0,0,0,0.038) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0,0,0,0.038) 1px, transparent 1px);
+  background-size: auto, 48px 48px, 48px 48px;
+}
+
+body[data-theme="solar"] .portal-bg {
+  background-image:
+    radial-gradient(ellipse 90% 50% at 50% 110%, rgba(251,146,60,0.12) 0%, transparent 55%),
+    radial-gradient(ellipse 50% 40% at 100% 0%, rgba(234,179,8,0.07) 0%, transparent 50%),
+    radial-gradient(circle, rgba(251,146,60,0.042) 1px, transparent 1px);
+  background-size: auto, auto, 32px 32px;
+}
+
+/* ================================================================
+   PORTAL-WIDE OVERRIDES — cascade từ .portal-bg xuống toàn bộ UI
+   Đảm bảo tất cả elements nhất quán với theme
+   ================================================================ */
+
+/* ── Text colors ── */
+.portal-bg { color: var(--theme-text); }
+
+.portal-bg .text-white,
+.portal-bg .text-neutral-100,
+.portal-bg .text-gray-100 {
+  color: var(--theme-text) !important;
+}
+
+.portal-bg .text-gray-400,
+.portal-bg .text-gray-500,
+.portal-bg .text-neutral-400,
+.portal-bg .text-neutral-500 {
+  color: var(--theme-text-muted) !important;
+}
+
+.portal-bg .text-gray-600,
+.portal-bg .text-gray-700,
+.portal-bg .text-neutral-600,
+.portal-bg .text-neutral-700 {
+  color: var(--theme-text-subtle) !important;
+}
+
+/* ── Surface backgrounds ── */
+.portal-bg .bg-black,
+.portal-bg .bg-neutral-950 {
+  background-color: var(--theme-surface) !important;
+}
+
+.portal-bg .bg-gray-900,
+.portal-bg .bg-neutral-900 {
+  background-color: var(--theme-surface-2) !important;
+}
+
+.portal-bg .bg-gray-800,
+.portal-bg .bg-neutral-800 {
+  background-color: var(--theme-surface-3) !important;
+}
+
+/* Semi-transparent overlays */
+.portal-bg .bg-black\/40,
+.portal-bg .bg-black\/50 {
+  background-color: var(--theme-overlay) !important;
+}
+
+.portal-bg .bg-black\/60,
+.portal-bg .bg-black\/70 {
+  background-color: color-mix(in srgb, var(--theme-surface) 85%, transparent) !important;
+}
+
+.portal-bg .bg-black\/80,
+.portal-bg .bg-black\/90 {
+  background-color: color-mix(in srgb, var(--theme-surface) 92%, transparent) !important;
+}
+
+/* ── Borders ── */
+.portal-bg .border-gray-800,
+.portal-bg .border-gray-700,
+.portal-bg .border-neutral-800,
+.portal-bg .border-neutral-700 {
+  border-color: var(--theme-border) !important;
+}
+
+.portal-bg .border-white\/10,
+.portal-bg .border-white\/5 {
+  border-color: var(--theme-border-soft) !important;
+}
+
+.portal-bg .border-white\/25,
+.portal-bg .border-white\/20 {
+  border-color: var(--theme-border) !important;
+}
+
+/* ── Dividers ── */
+.portal-bg .divide-gray-800 > * + * {
+  border-color: var(--theme-border) !important;
+}
+
+/* ── Hover state bg ── */
+.portal-bg .hover\:bg-gray-800:hover,
+.portal-bg .hover\:bg-gray-800\/50:hover {
+  background-color: var(--theme-surface-3) !important;
+}
+
+/* ── Input / textarea ── */
+.portal-bg input:not([type="color"]),
+.portal-bg textarea,
+.portal-bg select {
+  background-color: var(--theme-surface-2) !important;
+  border-color: var(--theme-border) !important;
+  color: var(--theme-text) !important;
+}
+
+.portal-bg input::placeholder,
+.portal-bg textarea::placeholder {
+  color: var(--theme-text-subtle) !important;
+}
+
+/* ── HEADER override ── */
+.portal-bg .portal-header {
+  background-color: var(--theme-header-bg) !important;
+  border-bottom-color: var(--theme-border-soft) !important;
+  backdrop-filter: blur(12px);
+}
+
+/* ================================================================
+   ACCENT COLOR — stays consistent across themes (mission accent)
+   ================================================================ */
+
+/* Accent text/bg được giữ nguyên — không override */
+.portal-bg .text-mission-accent { color: var(--color-mission-accent) !important; }
+.portal-bg .bg-mission-accent   { background-color: var(--color-mission-accent) !important; }
+.portal-bg .border-mission-accent { border-color: var(--color-mission-accent) !important; }
+
+/* ── SCROLLBAR adapts to theme ───────────────────────────── */
+.portal-bg::-webkit-scrollbar-track,
+.portal-bg *::-webkit-scrollbar-track { background: var(--theme-bg); }
+
+.portal-bg::-webkit-scrollbar-thumb,
+.portal-bg *::-webkit-scrollbar-thumb { background: var(--theme-border); border-radius: 0; }
+
+.portal-bg::-webkit-scrollbar-thumb:hover,
+.portal-bg *::-webkit-scrollbar-thumb:hover { background: var(--color-mission-accent); }

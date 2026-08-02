@@ -1,0 +1,26 @@
+@import './themes.css';
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --color-mission-accent: #B6FF00;
+  --color-mission-accent-rgb: 182, 255, 0;
+}
+
+body {
+  font-family: 'Inter', sans-serif;
+  background-color: var(--theme-bg, #050505);
+  color: var(--theme-text, #e5e5e5);
+  overflow: hidden;
+}
+
+/* .scanlines, .grid-bg đã bỏ — MiniCRM dùng UI clean, không cần hiệu ứng terminal */
+.scanlines { display: none !important; }
+.grid-bg   { background: none !important; }
+
+/* Custom scrollbar */
+::-webkit-scrollbar         { width: 6px; height: 6px; }
+::-webkit-scrollbar-track   { background: #0a0a0a; }
+::-webkit-scrollbar-thumb   { background: #333; border-radius: 0; }
+::-webkit-scrollbar-thumb:hover { background: #B6FF00; }
