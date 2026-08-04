@@ -778,6 +778,241 @@ async function handleCatalog(req, res) {
   }
 }
 
+// --- AI / OAuth Handlers (mirror api/oauth/openai/*.ts + api/ai/*.ts) ---
+import crypto2 from 'node:crypto'
+
+const OPENAI_ISSUER = 'https://auth.openai.com'
+const CODEX_CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann'
+const CODEX_BASE_URL = 'https://chatgpt.com/backend-api/codex'
+const CODEX_UA = 'customer-portal-giftbox/1.0'
+
+function encryptToken(plain) {
+  const hex = process.env.PROVIDER_ENCRYPTION_KEY
+  if (!hex || hex.length !== 64) throw new Error('PROVIDER_ENCRYPTION_KEY must be 64 hex chars')
+  const key = Buffer.from(hex, 'hex')
+  const iv = crypto2.randomBytes(12)
+  const cipher = crypto2.createCipheriv('aes-256-gcm', key, iv)
+  const ct = Buffer.concat([cipher.update(plain, 'utf8'), cipher.final()])
+  const tag = cipher.getAuthTag()
+  return Buffer.concat([iv, tag, ct]).toString('base64')
+}
+
+function decryptToken(payload) {
+  if (!payload) return ''
+  const hex = process.env.PROVIDER_ENCRYPTION_KEY
+  if (!hex || hex.length !== 64) throw new Error('PROVIDER_ENCRYPTION_KEY must be 64 hex chars')
+  const key = Buffer.from(hex, 'hex')
+  const raw = Buffer.from(payload, 'base64')
+  const iv = raw.subarray(0, 12)
+  const tag = raw.subarray(12, 28)
+  const ct = raw.subarray(28)
+  const decipher = crypto2.createDecipheriv('aes-256-gcm', key, iv)
+  decipher.setAuthTag(tag)
+  return Buffer.concat([decipher.update(ct), decipher.final()]).toString('utf8')
+}
+
+async function assertAdmin(req, res) {
+  const authHeader = req.headers.authorization || ''
+  if (!authHeader.startsWith('Bearer ')) { res.status(401).json({ error: 'Missing token' }); return null }
+  const token = authHeader.slice(7)
+  const userClient = createClient(process.env.VITE_SUPABASE_URL, process.env.VITE_SUPABASE_ANON_KEY, {
+    global: { headers: { Authorization: `Bearer ${token}` } }
+  })
+  const { data: { user } } = await userClient.auth.getUser()
+  if (!user) { res.status(401).json({ error: 'Invalid token' }); return null }
+  const { data: caller } = await userClient.from('customers').select('role').eq('id', user.id).maybeSingle()
+  if (caller?.role !== 'admin') { res.status(403).json({ error: 'Admin only' }); return null }
+  return user
+}
+
+function adminDbClient() {
+  return createClient(process.env.VITE_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, {
+    auth: { autoRefreshToken: false, persistSession: false }
+  })
+}
+
+async function handleOAuthOpenAIStart(req, res) {
+  const user = await assertAdmin(req, res); if (!user) return
+  try {
+    const resp = await fetch(`${OPENAI_ISSUER}/api/accounts/deviceauth/usercode`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'User-Agent': CODEX_UA },
+      body: JSON.stringify({ client_id: CODEX_CLIENT_ID }),
+    })
+    if (resp.status === 429) return res.status(429).json({ error: 'OpenAI rate limited (429)' })
+    if (!resp.ok) return res.status(500).json({ error: `Device code request HTTP ${resp.status}` })
+    const data = await resp.json()
+    if (!data.user_code || !data.device_auth_id) return res.status(500).json({ error: 'Malformed device code response' })
+    const interval = Math.max(3, Number(data.interval) || 5)
+    const expiresAt = new Date(Date.now() + 15 * 60 * 1000)
+    const db = adminDbClient()
+    const { data: session, error } = await db.from('oauth_device_sessions').insert({
+      provider: 'openai-codex', device_auth_id: data.device_auth_id, user_code: data.user_code,
+      verification_uri: `${OPENAI_ISSUER}/codex/device`, poll_interval_seconds: interval,
+      expires_at: expiresAt.toISOString(), status: 'pending', created_by: user.id,
+    }).select('id').single()
+    if (error || !session) return res.status(500).json({ error: `Session persist failed: ${error?.message}` })
+    return res.json({
+      session_id: session.id, user_code: data.user_code,
+      verification_uri: `${OPENAI_ISSUER}/codex/device`,
+      poll_interval: interval, expires_at: expiresAt.toISOString(),
+    })
+  } catch (e) { return res.status(500).json({ error: e.message }) }
+}
+
+async function handleOAuthOpenAIPoll(req, res) {
+  const user = await assertAdmin(req, res); if (!user) return
+  const { session_id } = req.body || {}
+  if (!session_id) return res.status(400).json({ error: 'session_id required' })
+  const db = adminDbClient()
+  const { data: session } = await db.from('oauth_device_sessions').select('*').eq('id', session_id).maybeSingle()
+  if (!session) return res.status(404).json({ error: 'Session not found' })
+  if (new Date(session.expires_at) < new Date()) {
+    await db.from('oauth_device_sessions').update({ status: 'expired' }).eq('id', session_id)
+    return res.json({ status: 'expired' })
+  }
+  if (session.status !== 'pending') return res.json({ status: session.status })
+  try {
+    const pollResp = await fetch(`${OPENAI_ISSUER}/api/accounts/deviceauth/token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'User-Agent': CODEX_UA },
+      body: JSON.stringify({ device_auth_id: session.device_auth_id, user_code: session.user_code }),
+    })
+    if (pollResp.status === 403 || pollResp.status === 404) return res.json({ status: 'pending' })
+    if (pollResp.status !== 200) return res.status(500).json({ status: 'error', error: `Poll HTTP ${pollResp.status}` })
+    const pollData = await pollResp.json()
+    const { authorization_code, code_verifier } = pollData
+    if (!authorization_code || !code_verifier) return res.status(500).json({ status: 'error', error: 'Missing auth_code/verifier' })
+    const body = new URLSearchParams({
+      grant_type: 'authorization_code', code: authorization_code,
+      redirect_uri: `${OPENAI_ISSUER}/deviceauth/callback`,
+      client_id: CODEX_CLIENT_ID, code_verifier,
+    })
+    const tokResp = await fetch(`${OPENAI_ISSUER}/oauth/token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': CODEX_UA },
+      body: body.toString(),
+    })
+    if (!tokResp.ok) return res.status(500).json({ status: 'error', error: `Token exchange HTTP ${tokResp.status}` })
+    const tokens = await tokResp.json()
+    if (!tokens.access_token) return res.status(500).json({ status: 'error', error: 'No access_token' })
+    const expiresAt = tokens.expires_in ? new Date(Date.now() + tokens.expires_in * 1000) : null
+    await db.from('provider_credentials').upsert({
+      provider: 'openai-codex', auth_type: 'oauth_device_code', display_name: 'ChatGPT (subscription)',
+      status: 'active',
+      access_token_encrypted: encryptToken(tokens.access_token),
+      refresh_token_encrypted: tokens.refresh_token ? encryptToken(tokens.refresh_token) : null,
+      base_url: CODEX_BASE_URL, expires_at: expiresAt?.toISOString() || null,
+      scopes: tokens.scope ? tokens.scope.split(' ') : null,
+      connected_at: new Date().toISOString(), last_refreshed_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'provider' })
+    await db.from('oauth_device_sessions').update({
+      status: 'authorized', authorized_at: new Date().toISOString(),
+    }).eq('id', session_id)
+    return res.json({ status: 'authorized', provider: 'openai-codex', expires_at: expiresAt?.toISOString() || null })
+  } catch (e) { return res.status(500).json({ status: 'error', error: e.message }) }
+}
+
+async function handleOAuthOpenAIStatus(req, res) {
+  const user = await assertAdmin(req, res); if (!user) return
+  const db = adminDbClient()
+  const { data: cred } = await db.from('provider_credentials')
+    .select('provider, auth_type, display_name, status, base_url, expires_at, account_email, connected_at, last_refreshed_at, last_used_at')
+    .eq('provider', 'openai-codex').maybeSingle()
+  if (!cred) return res.json({ connected: false })
+  const expired = cred.expires_at && new Date(cred.expires_at) < new Date()
+  return res.json({ ...cred, connected: cred.status === 'active' && !expired, expired })
+}
+
+async function handleOAuthOpenAIDisconnect(req, res) {
+  const user = await assertAdmin(req, res); if (!user) return
+  const db = adminDbClient()
+  const { error } = await db.from('provider_credentials').delete().eq('provider', 'openai-codex')
+  if (error) return res.status(500).json({ error: error.message })
+  return res.json({ success: true })
+}
+
+async function loadCredForRuntime(provider) {
+  const db = adminDbClient()
+  const { data: cred } = await db.from('provider_credentials').select('*').eq('provider', provider).maybeSingle()
+  if (!cred || cred.status !== 'active') throw new Error(`Provider ${provider} not connected`)
+  let accessToken = decryptToken(cred.access_token_encrypted)
+  const expiresAt = cred.expires_at ? new Date(cred.expires_at) : null
+  const expiringSoon = expiresAt && (expiresAt.getTime() - Date.now() < 120 * 1000)
+  if (expiringSoon && cred.refresh_token_encrypted) {
+    const refreshToken = decryptToken(cred.refresh_token_encrypted)
+    const body = new URLSearchParams({
+      grant_type: 'refresh_token', refresh_token: refreshToken, client_id: CODEX_CLIENT_ID,
+    })
+    const resp = await fetch(`${OPENAI_ISSUER}/oauth/token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': CODEX_UA },
+      body: body.toString(),
+    })
+    if (resp.ok) {
+      const tokens = await resp.json()
+      accessToken = tokens.access_token
+      const newExpires = tokens.expires_in ? new Date(Date.now() + tokens.expires_in * 1000) : null
+      await db.from('provider_credentials').update({
+        access_token_encrypted: encryptToken(tokens.access_token),
+        refresh_token_encrypted: tokens.refresh_token ? encryptToken(tokens.refresh_token) : cred.refresh_token_encrypted,
+        expires_at: newExpires?.toISOString() || null,
+        last_refreshed_at: new Date().toISOString(),
+      }).eq('provider', provider)
+    }
+  }
+  db.from('provider_credentials').update({ last_used_at: new Date().toISOString() }).eq('provider', provider).then(()=>{},()=>{})
+  return { accessToken, baseUrl: cred.base_url || CODEX_BASE_URL }
+}
+
+async function handleAIModels(req, res) {
+  const user = await assertAdmin(req, res); if (!user) return
+  const url = new URL(req.url, 'http://localhost')
+  const provider = url.searchParams.get('provider') || 'openai-codex'
+  try {
+    const cred = await loadCredForRuntime(provider)
+    const resp = await fetch(`${cred.baseUrl}/models`, {
+      headers: { 'Authorization': `Bearer ${cred.accessToken}`, 'OpenAI-Beta': 'responses=v1' },
+    })
+    if (!resp.ok) return res.json({ provider, models: ['gpt-5.6-sol', 'gpt-5.5', 'gpt-5.1', 'gpt-4o'] })
+    const data = await resp.json()
+    const ids = (data.data || []).map(m => m.id).filter(Boolean)
+    return res.json({ provider, models: ids.length ? ids : ['gpt-5.6-sol'] })
+  } catch (e) { return res.status(500).json({ error: e.message }) }
+}
+
+async function handleAIGenerate(req, res) {
+  const user = await assertAdmin(req, res); if (!user) return
+  const { provider = 'openai-codex', model = 'gpt-5.6-sol', systemPrompt, userPrompt, maxTokens = 4096, temperature = 0.7 } = req.body || {}
+  if (!userPrompt) return res.status(400).json({ error: 'userPrompt required' })
+  try {
+    const cred = await loadCredForRuntime(provider)
+    const messages = []
+    if (systemPrompt) messages.push({ role: 'system', content: systemPrompt })
+    messages.push({ role: 'user', content: userPrompt })
+    const resp = await fetch(`${cred.baseUrl}/responses`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${cred.accessToken}`, 'OpenAI-Beta': 'responses=v1' },
+      body: JSON.stringify({ model, input: messages, max_output_tokens: maxTokens, temperature, stream: false }),
+    })
+    if (!resp.ok) {
+      const text = await resp.text().catch(() => '')
+      return res.status(500).json({ error: `Codex HTTP ${resp.status}: ${text.slice(0, 300)}` })
+    }
+    const data = await resp.json()
+    let text = data.output_text || ''
+    if (!text && Array.isArray(data.output)) {
+      for (const item of data.output) {
+        if (item.type === 'message' && Array.isArray(item.content)) {
+          for (const c of item.content) if (c.type === 'output_text' && c.text) text += c.text
+        }
+      }
+    }
+    return res.json({ text, model, provider, usage: data.usage })
+  } catch (e) { return res.status(500).json({ error: e.message }) }
+}
+
 // --- Email Handlers (mirror api/email/*.ts for dev + Railway) ---
 const TEMPLATES_DIR = resolve('emails/templates')
 const _tplCache = new Map()
@@ -1006,6 +1241,18 @@ const server = http.createServer(async (req, nodeRes) => {
       await handleAffiliateDashboard(mockReq, res)
     } else if (req.url?.startsWith('/api/tracking/ref')) {
       await handleTrackingRef(mockReq, res)
+    } else if (req.url === '/api/oauth/openai/start') {
+      await handleOAuthOpenAIStart(mockReq, res)
+    } else if (req.url === '/api/oauth/openai/poll') {
+      await handleOAuthOpenAIPoll(mockReq, res)
+    } else if (req.url === '/api/oauth/openai/status') {
+      await handleOAuthOpenAIStatus(mockReq, res)
+    } else if (req.url === '/api/oauth/openai/disconnect') {
+      await handleOAuthOpenAIDisconnect(mockReq, res)
+    } else if (req.url?.startsWith('/api/ai/models')) {
+      await handleAIModels(mockReq, res)
+    } else if (req.url === '/api/ai/generate') {
+      await handleAIGenerate(mockReq, res)
     } else if (req.url === '/api/email/send') {
       await handleEmailSend(mockReq, res)
     } else if (req.url === '/api/email/broadcast') {

@@ -38,6 +38,7 @@ Xem `.env.schema.json` cho danh sách đầy đủ. Khi setup lần đầu, agen
 - `VITE_SUPABASE_ANON_KEY` — Anon key public
 - `SUPABASE_SERVICE_ROLE_KEY` — Service role key (server-side)
 - `VITE_ADMIN_EMAIL` — Email admin đầu tiên
+- `PROVIDER_ENCRYPTION_KEY` — 64 hex chars (32 bytes) để encrypt OAuth tokens. Bắt buộc nếu dùng AI features. Generate: `openssl rand -hex 32`
 
 **Khuyến nghị (thiếu vẫn chạy được nhưng thiếu tính năng):**
 - `RESEND_API_KEY` — Gửi email welcome/magic link (free 3000 email/tháng)
@@ -111,6 +112,28 @@ Khi user nói "thêm khóa học X" hoặc `/portal add-course`:
 3. Insert qua Supabase REST vào bảng `courses`, `zones`, `quests`, `tasks`, `videos`, `resources`
 4. Verify: fetch course_id vừa tạo, count zones/quests đúng chưa
 5. Nếu user muốn: tạo enrollment cho student sẵn có
+
+## AI Providers (ChatGPT via OAuth)
+
+Portal hỗ trợ kết nối ChatGPT Plus subscription qua **OAuth device flow** (giống Hermes Agent):
+- Client ID: `app_EMoamEEZ73f0CkXaXp7hrann` (Codex CLI public client_id)
+- Endpoints: `auth.openai.com/api/accounts/deviceauth/{usercode,token}`, `auth.openai.com/oauth/token`
+- API base: `chatgpt.com/backend-api/codex/responses`
+- Tokens stored **encrypted** (AES-256-GCM) trong bảng `provider_credentials`
+
+**Admin flow**:
+1. Vào `/admin/ai` → bấm "Connect ChatGPT"
+2. Portal request device code từ OpenAI → show `user_code`
+3. User mở `auth.openai.com/codex/device` → nhập code → authorize
+4. Portal poll `/api/oauth/openai/poll` mỗi vài giây → nhận tokens → lưu encrypted
+5. Sau đó `/api/ai/generate` và `/api/ai/models` sẵn sàng dùng
+
+**Cảnh báo cần nói với user**:
+- Dùng client_id public của Codex CLI (grey area, không phải TOS violation blatant nhưng OpenAI có thể restrict)
+- Không share portal cho nhiều người dùng chung 1 ChatGPT account (rate limit)
+- Token expire → refresh_token dùng auto-refresh; nếu refresh fail → user reconnect
+
+**Roadmap**: Claude Pro, xAI Grok, GitHub Copilot, API keys (Anthropic/OpenAI/Groq/OpenRouter/DeepSeek/Kimi/Qwen).
 
 ## Khi User Yêu Cầu Sửa Code
 
