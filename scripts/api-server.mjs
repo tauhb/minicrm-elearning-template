@@ -56,7 +56,22 @@ function makeRes(nodeRes) {
       }
       return res
     },
-    end(...args) { nodeRes.end(...args); return res },
+    send(body) {
+      if (!nodeRes.headersSent) {
+        // If handler set Content-Type via setHeader, headers[] already has it.
+        // Default was application/json; if handler wants text/html, they call setHeader first.
+        nodeRes.writeHead(statusCode, headers)
+        if (body == null) nodeRes.end()
+        else if (typeof body === 'string' || Buffer.isBuffer(body)) nodeRes.end(body)
+        else nodeRes.end(String(body))
+      }
+      return res
+    },
+    end(...args) {
+      if (!nodeRes.headersSent) nodeRes.writeHead(statusCode, headers)
+      nodeRes.end(...args)
+      return res
+    },
   }
   return res
 }
