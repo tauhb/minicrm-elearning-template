@@ -1,32 +1,36 @@
 import React, { useState, useEffect, useCallback } from 'react'
-import { Sparkles, Plus, Loader2, Eye, Edit2, Trash2, ExternalLink, Copy, Check, RefreshCw, Send, ChevronLeft, Zap, X } from 'lucide-react'
+import { Sparkles, Plus, Loader2, Eye, Edit2, Trash2, ExternalLink, Send, ChevronLeft, Layers, Wand2, FileCode2, X, Check, ArrowRight, Copy, Save, Zap } from 'lucide-react'
 import { supabase } from '../../services/supabase'
+import { StylePicker, StylePreset } from './funnels/StylePicker'
+import { ContentDraftEditor, CopyDraft } from './funnels/ContentDraftEditor'
 
-type FunnelType = 'sales' | 'leads' | 'webinar'
 type Status = 'draft' | 'published' | 'archived'
 
 interface FunnelListItem {
-  id: string
-  slug: string
-  name: string
-  type: FunnelType
-  status: Status
-  visits: number
-  cta_clicks: number
-  form_submits: number
-  updated_at: string
+  id: string; slug: string; name: string; type_key: string; status: Status
+  style_preset?: StylePreset; created_at: string; updated_at: string; published_at?: string
 }
-
 interface FunnelDetail extends FunnelListItem {
-  copy_input: Record<string, any>
-  html: string | null
-  generation_meta: Record<string, any>
+  shared_context: Record<string, any>
+  custom_prompt: string | null
+  payment_mode: string
+  auto_nurture: boolean
   custom_domain: string | null
-  created_at: string
-  published_at: string | null
+  steps: StepDetail[]
 }
+interface StepDetail {
+  id: string; funnel_id: string; step_number: number; slug: string; name: string; page_type: string
+  content_source: 'ai_draft' | 'ai_direct' | 'imported' | 'blank'
+  has_form: boolean; form_mode: string; form_fields: any[]; form_success_step_slug?: string
+  copy_input: any; copy_formula_key?: string; copy_raw_input?: string
+  copy_draft?: CopyDraft; copy_approved: boolean; copy_approved_at?: string
+  html?: string; html_generated_from_copy_at?: string
+  visits: number; cta_clicks: number; form_submits: number
+}
+interface FunnelType { id: string; key: string; name: string; icon: string; color: string; description: string; suggested_steps: any[] }
+interface Formula { id: string; key: string; name: string; description: string }
 
-async function apiCall<T = any>(path: string, opts: RequestInit = {}): Promise<T> {
+async function api<T = any>(path: string, opts: RequestInit = {}): Promise<T> {
   const { data: { session } } = await supabase.auth.getSession()
   const res = await fetch(path, {
     ...opts,
@@ -41,18 +45,29 @@ async function apiCall<T = any>(path: string, opts: RequestInit = {}): Promise<T
   return data as T
 }
 
-// ══════════════════════════════════════════════════════════════════════════
-// LIST VIEW
-// ══════════════════════════════════════════════════════════════════════════
-function FunnelsList({ onNew, onEdit }: { onNew: () => void; onEdit: (id: string) => void }) {
+// ═══════════════════════════════════════════════════════════════════════════
+// ROOT
+// ═══════════════════════════════════════════════════════════════════════════
+export default function AIFunnelsView() {
+  const [mode, setMode] = useState<'list' | 'detail' | 'wizard'>('list')
+  const [detailId, setDetailId] = useState<string | null>(null)
+
+  if (mode === 'wizard') return <FunnelWizard onCancel={() => setMode('list')} onCreated={id => { setDetailId(id); setMode('detail') }} />
+  if (mode === 'detail' && detailId) return <FunnelDetailView id={detailId} onBack={() => { setMode('list'); setDetailId(null) }} />
+  return <FunnelsList onNew={() => setMode('wizard')} onOpen={id => { setDetailId(id); setMode('detail') }} />
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// LIST
+// ═══════════════════════════════════════════════════════════════════════════
+function FunnelsList({ onNew, onOpen }: { onNew: () => void; onOpen: (id: string) => void }) {
   const [funnels, setFunnels] = useState<FunnelListItem[]>([])
   const [loading, setLoading] = useState(true)
-  const [filterType, setFilterType] = useState<'all' | FunnelType>('all')
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const r = await apiCall<{ funnels: FunnelListItem[] }>('/api/funnels/save')
+      const r = await api<{ funnels: FunnelListItem[] }>('/api/funnel-flows')
       setFunnels(r.funnels)
     } catch (e: any) { console.error(e) }
     finally { setLoading(false) }
@@ -60,66 +75,42 @@ function FunnelsList({ onNew, onEdit }: { onNew: () => void; onEdit: (id: string
   useEffect(() => { load() }, [load])
 
   const del = async (id: string, name: string) => {
-    if (!confirm(`Xoá funnel "${name}"?`)) return
-    await apiCall(`/api/funnels/save?id=${id}`, { method: 'DELETE' })
+    if (!confirm(`Xoá funnel "${name}" (kèm tất cả steps)?`)) return
+    await api(`/api/funnel-flows?id=${id}`, { method: 'DELETE' })
     load()
   }
 
   const publish = async (id: string) => {
-    await apiCall(`/api/funnels/save?action=publish&id=${id}`, { method: 'POST' })
+    await api(`/api/funnel-flows?action=publish&id=${id}`, { method: 'POST' })
     load()
   }
 
-  const filtered = filterType === 'all' ? funnels : funnels.filter(f => f.type === filterType)
-
   return (
-    <div className="max-w-6xl mx-auto py-6 px-4">
+    <div className="max-w-full py-6 px-4">
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold flex items-center gap-2">
             <Sparkles className="w-6 h-6" style={{ color: 'var(--color-mission-accent)' }} />
-            AI Funnel Builder
+            AI Funnels
           </h1>
-          <p className="text-sm text-neutral-500 mt-1">
-            Nhập copy → AI sinh landing page → publish tại <code>/f/&lt;slug&gt;</code>
-          </p>
+          <p className="text-sm text-neutral-500 mt-1">Multi-step funnel builder — content-first workflow.</p>
         </div>
-        <button
-          onClick={onNew}
+        <button onClick={onNew}
           style={{ background: 'var(--color-mission-accent)', color: '#000' }}
-          className="inline-flex items-center gap-2 px-5 py-2.5 font-semibold rounded-lg hover:opacity-90 transition"
-        >
+          className="inline-flex items-center gap-2 px-5 py-2.5 font-semibold rounded-lg hover:opacity-90">
           <Plus className="w-4 h-4" /> Tạo funnel mới
         </button>
       </div>
 
-      <div className="flex gap-2 mb-4">
-        {(['all', 'sales', 'leads', 'webinar'] as const).map(t => (
-          <button
-            key={t}
-            onClick={() => setFilterType(t)}
-            className={`px-3 py-1.5 text-sm rounded-md transition ${
-              filterType === t ? 'bg-neutral-700 text-white' : 'bg-neutral-900 text-neutral-500 hover:text-white'
-            }`}
-          >
-            {t === 'all' ? 'Tất cả' : t.charAt(0).toUpperCase() + t.slice(1)}
-          </button>
-        ))}
-      </div>
-
       {loading ? (
-        <div className="text-center py-16 text-neutral-500">
-          <Loader2 className="w-6 h-6 animate-spin mx-auto mb-2" /> Đang tải...
-        </div>
-      ) : filtered.length === 0 ? (
+        <div className="text-center py-16 text-neutral-500"><Loader2 className="w-6 h-6 animate-spin mx-auto" /></div>
+      ) : funnels.length === 0 ? (
         <div className="text-center py-16 border border-dashed border-neutral-800 rounded-xl">
           <Sparkles className="w-10 h-10 mx-auto mb-3 text-neutral-700" />
           <p className="text-neutral-500 mb-4">Chưa có funnel nào.</p>
-          <button
-            onClick={onNew}
+          <button onClick={onNew}
             style={{ background: 'var(--color-mission-accent)', color: '#000' }}
-            className="inline-flex items-center gap-2 px-4 py-2 font-semibold rounded-lg hover:opacity-90"
-          >
+            className="inline-flex items-center gap-2 px-4 py-2 font-semibold rounded-lg hover:opacity-90">
             <Plus className="w-4 h-4" /> Tạo funnel đầu tiên
           </button>
         </div>
@@ -128,24 +119,20 @@ function FunnelsList({ onNew, onEdit }: { onNew: () => void; onEdit: (id: string
           <table className="w-full text-sm">
             <thead className="bg-neutral-900/50 text-neutral-500 text-xs uppercase tracking-wider">
               <tr>
-                <th className="text-left px-4 py-3">Tên</th>
+                <th className="text-left px-4 py-3">Name</th>
                 <th className="text-left px-4 py-3">Slug</th>
                 <th className="text-left px-4 py-3">Type</th>
                 <th className="text-left px-4 py-3">Status</th>
-                <th className="text-right px-4 py-3">Visits</th>
-                <th className="text-right px-4 py-3">CTA</th>
-                <th className="text-right px-4 py-3">Forms</th>
+                <th className="text-left px-4 py-3">Updated</th>
                 <th className="px-4 py-3"></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-neutral-800">
-              {filtered.map(f => (
-                <tr key={f.id} className="hover:bg-neutral-900/30">
+              {funnels.map(f => (
+                <tr key={f.id} className="hover:bg-neutral-900/30 cursor-pointer" onClick={() => onOpen(f.id)}>
                   <td className="px-4 py-3 font-medium">{f.name}</td>
                   <td className="px-4 py-3 text-neutral-500 font-mono text-xs">/f/{f.slug}</td>
-                  <td className="px-4 py-3">
-                    <span className="text-xs px-2 py-0.5 bg-neutral-800 rounded">{f.type}</span>
-                  </td>
+                  <td className="px-4 py-3 text-xs">{f.type_key}</td>
                   <td className="px-4 py-3">
                     <span className={`text-xs px-2 py-0.5 rounded border ${
                       f.status === 'published' ? 'bg-green-500/10 text-green-400 border-green-500/30' :
@@ -153,28 +140,17 @@ function FunnelsList({ onNew, onEdit }: { onNew: () => void; onEdit: (id: string
                       'bg-amber-500/10 text-amber-400 border-amber-500/30'
                     }`}>{f.status}</span>
                   </td>
-                  <td className="px-4 py-3 text-right tabular-nums">{f.visits}</td>
-                  <td className="px-4 py-3 text-right tabular-nums">{f.cta_clicks}</td>
-                  <td className="px-4 py-3 text-right tabular-nums">{f.form_submits}</td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center justify-end gap-1">
+                  <td className="px-4 py-3 text-xs text-neutral-500">{new Date(f.updated_at).toLocaleString('vi-VN')}</td>
+                  <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
+                    <div className="flex justify-end gap-1">
                       {f.status === 'published' && (
-                        <a href={`/f/${f.slug}`} target="_blank" rel="noopener noreferrer"
-                           className="p-1.5 hover:bg-neutral-800 rounded" title="View live">
-                          <ExternalLink className="w-4 h-4" />
-                        </a>
+                        <a href={`/f/${f.slug}`} target="_blank" rel="noopener noreferrer" className="p-1.5 hover:bg-neutral-800 rounded" title="View live"><ExternalLink className="w-4 h-4" /></a>
                       )}
-                      <button onClick={() => onEdit(f.id)} className="p-1.5 hover:bg-neutral-800 rounded" title="Edit">
-                        <Edit2 className="w-4 h-4" />
-                      </button>
+                      <button onClick={() => onOpen(f.id)} className="p-1.5 hover:bg-neutral-800 rounded" title="Edit"><Edit2 className="w-4 h-4" /></button>
                       {f.status !== 'published' && (
-                        <button onClick={() => publish(f.id)} className="p-1.5 hover:bg-neutral-800 rounded" title="Publish">
-                          <Send className="w-4 h-4 text-green-400" />
-                        </button>
+                        <button onClick={() => publish(f.id)} className="p-1.5 hover:bg-neutral-800 rounded" title="Publish"><Send className="w-4 h-4 text-green-400" /></button>
                       )}
-                      <button onClick={() => del(f.id, f.name)} className="p-1.5 hover:bg-neutral-800 rounded" title="Delete">
-                        <Trash2 className="w-4 h-4 text-red-400" />
-                      </button>
+                      <button onClick={() => del(f.id, f.name)} className="p-1.5 hover:bg-neutral-800 rounded" title="Delete"><Trash2 className="w-4 h-4 text-red-400" /></button>
                     </div>
                   </td>
                 </tr>
@@ -187,298 +163,526 @@ function FunnelsList({ onNew, onEdit }: { onNew: () => void; onEdit: (id: string
   )
 }
 
-// ══════════════════════════════════════════════════════════════════════════
-// BUILDER (create/edit)
-// ══════════════════════════════════════════════════════════════════════════
-function FunnelBuilder({ id, onBack }: { id: string | null; onBack: () => void }) {
-  const [type, setType] = useState<FunnelType>('sales')
-  const [name, setName] = useState('')
-  const [slug, setSlug] = useState('')
-  const [copyInput, setCopyInput] = useState<Record<string, string>>({})
-  const [html, setHtml] = useState('')
-  const [meta, setMeta] = useState<any>(null)
-  const [savedId, setSavedId] = useState<string | null>(null)
-  const [status, setStatus] = useState<Status>('draft')
-
-  const [generating, setGenerating] = useState(false)
+// ═══════════════════════════════════════════════════════════════════════════
+// WIZARD (create new funnel)
+// ═══════════════════════════════════════════════════════════════════════════
+function FunnelWizard({ onCancel, onCreated }: { onCancel: () => void; onCreated: (id: string) => void }) {
+  const [step, setStep] = useState<1 | 2 | 3>(1)
+  const [types, setTypes] = useState<FunnelType[]>([])
+  const [form, setForm] = useState({
+    name: '', slug: '', type_key: '',
+    payment_mode: 'collect_only',
+    auto_nurture: true,
+    style_preset: { vibe: 'minimal', fontPair: 'Inter+Playfair Display', layout: 'balanced', density: 'balanced', brandColor: '#B6FF00' } as StylePreset,
+    shared_context: '',   // free text
+    use_custom_prompt: false,
+    custom_prompt: '',
+  })
   const [saving, setSaving] = useState(false)
-  const [iterationText, setIterationText] = useState('')
-  const [previewMode, setPreviewMode] = useState<'preview' | 'code'>('preview')
   const [error, setError] = useState<string | null>(null)
-  const [copiedUrl, setCopiedUrl] = useState(false)
 
-  // Load existing if editing
   useEffect(() => {
-    if (!id) return
-    apiCall<FunnelDetail>(`/api/funnels/save?id=${id}`).then(f => {
-      setType(f.type)
-      setName(f.name)
-      setSlug(f.slug)
-      setCopyInput((f.copy_input as any) || {})
-      setHtml(f.html || '')
-      setMeta(f.generation_meta || null)
-      setSavedId(f.id)
-      setStatus(f.status)
-    }).catch(e => setError(e.message))
-  }, [id])
+    api<{ types: FunnelType[] }>('/api/funnel-types').then(r => {
+      setTypes(r.types)
+      if (r.types[0]) setForm(f => ({ ...f, type_key: r.types[0].key }))
+    })
+  }, [])
 
-  const setField = (k: string, v: string) => setCopyInput(prev => ({ ...prev, [k]: v }))
+  const setF = <K extends keyof typeof form>(k: K, v: typeof form[K]) => setForm(prev => ({ ...prev, [k]: v }))
 
-  const doGenerate = async (iteration = false) => {
-    setError(null)
-    setGenerating(true)
-    try {
-      const body: any = { type, input: copyInput }
-      if (iteration && savedId) {
-        body.funnel_id = savedId
-        body.iteration_instruction = iterationText
-      }
-      const r = await apiCall<{ html: string; meta: any }>('/api/funnels/generate', {
-        method: 'POST', body: JSON.stringify(body)
-      })
-      setHtml(r.html)
-      setMeta(r.meta)
-      if (iteration) setIterationText('')
-    } catch (e: any) { setError(e.message) }
-    finally { setGenerating(false) }
-  }
-
-  const doSave = async (statusOverride?: Status) => {
-    setError(null)
-    setSaving(true)
+  const create = async () => {
+    setSaving(true); setError(null)
     try {
       const body: any = {
-        name, slug: slug || undefined, type, status: statusOverride || status,
-        copy_input: copyInput, html, generation_meta: meta,
+        name: form.name, slug: form.slug || undefined, type_key: form.type_key,
+        style_preset: form.style_preset,
+        shared_context: parseSharedContext(form.shared_context),
+        payment_mode: form.payment_mode,
+        auto_nurture: form.auto_nurture,
+        custom_prompt: form.use_custom_prompt ? form.custom_prompt : null,
       }
-      if (savedId) body.id = savedId
-      const saved = await apiCall<FunnelDetail>('/api/funnels/save', {
-        method: 'POST', body: JSON.stringify(body)
-      })
-      setSavedId(saved.id)
-      setSlug(saved.slug)
-      setStatus(saved.status)
-      if (statusOverride === 'published') alert(`✓ Đã publish tại /f/${saved.slug}`)
-    } catch (e: any) { setError(e.message) }
-    finally { setSaving(false) }
+      const created = await api<{ id: string }>('/api/funnel-flows', { method: 'POST', body: JSON.stringify(body) })
+      onCreated(created.id)
+    } catch (e: any) { setError(e.message); setSaving(false) }
   }
-
-  const doPublish = async () => {
-    if (!savedId) { await doSave('published'); return }
-    await apiCall(`/api/funnels/save?action=publish&id=${savedId}`, { method: 'POST' })
-    setStatus('published')
-    alert(`✓ Đã publish tại /f/${slug}`)
-  }
-
-  const publicUrl = slug ? `${window.location.origin}/f/${slug}` : ''
 
   return (
-    <div className="max-w-full mx-auto py-4 px-4">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-4 border-b border-neutral-800 pb-4">
-        <div className="flex items-center gap-3">
-          <button onClick={onBack} className="p-2 hover:bg-neutral-800 rounded">
-            <ChevronLeft className="w-5 h-5" />
-          </button>
-          <div>
-            <h1 className="text-xl font-bold">{savedId ? name || 'Edit funnel' : 'Tạo funnel mới'}</h1>
-            {publicUrl && status === 'published' && (
-              <div className="flex items-center gap-2 mt-1">
-                <a href={publicUrl} target="_blank" rel="noopener noreferrer" className="text-xs text-green-400 hover:underline">
-                  {publicUrl}
-                </a>
-                <button onClick={() => { navigator.clipboard.writeText(publicUrl); setCopiedUrl(true); setTimeout(() => setCopiedUrl(false), 2000) }}
-                        className="text-xs text-neutral-500 hover:text-white">
-                  {copiedUrl ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => doSave()}
-            disabled={saving || !name}
-            className="px-4 py-2 border border-neutral-700 rounded-lg hover:bg-neutral-800 disabled:opacity-40 text-sm"
-          >
-            {saving ? <Loader2 className="w-4 h-4 animate-spin inline" /> : 'Save draft'}
-          </button>
-          <button
-            onClick={doPublish}
-            disabled={!html || saving}
-            style={{ background: 'var(--color-mission-accent)', color: '#000' }}
-            className="inline-flex items-center gap-2 px-4 py-2 font-semibold rounded-lg hover:opacity-90 disabled:opacity-40 text-sm"
-          >
-            <Send className="w-4 h-4" /> {status === 'published' ? 'Update live' : 'Publish'}
-          </button>
-        </div>
+    <div className="max-w-4xl mx-auto py-6 px-4">
+      <div className="flex items-center gap-3 mb-6">
+        <button onClick={onCancel} className="p-2 hover:bg-neutral-800 rounded"><ChevronLeft className="w-5 h-5" /></button>
+        <h1 className="text-xl font-bold">Tạo funnel mới</h1>
       </div>
 
-      {error && (
-        <div className="mb-4 p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-sm text-red-400 flex items-start justify-between gap-2">
-          <span>{error}</span>
-          <button onClick={() => setError(null)}><X className="w-4 h-4" /></button>
+      {/* Stepper */}
+      <div className="flex items-center gap-2 mb-8">
+        {[1, 2, 3].map(n => (
+          <React.Fragment key={n}>
+            <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-semibold ${step >= n ? 'text-black' : 'bg-neutral-800 text-neutral-500'}`}
+              style={step >= n ? { background: 'var(--color-mission-accent)' } : undefined}>
+              {step > n ? <Check className="w-4 h-4" /> : n}
+            </div>
+            {n < 3 && <div className={`flex-1 h-0.5 ${step > n ? '' : 'bg-neutral-800'}`} style={step > n ? { background: 'var(--color-mission-accent)' } : undefined} />}
+          </React.Fragment>
+        ))}
+      </div>
+
+      {error && <div className="mb-4 p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-sm text-red-400">{error}</div>}
+
+      {/* Step 1: Basic */}
+      {step === 1 && (
+        <div className="space-y-4 max-w-2xl">
+          <h2 className="text-lg font-semibold">Bước 1: Basic info</h2>
+          <div>
+            <label className="text-xs text-neutral-500 uppercase tracking-wider block mb-1">Tên funnel *</label>
+            <input value={form.name} onChange={e => setF('name', e.target.value)} className="w-full px-3 py-2 bg-neutral-900 border border-neutral-800 rounded-lg text-sm" placeholder='VD: "Khoá AI Marketing 30 Ngày"' />
+          </div>
+          <div>
+            <label className="text-xs text-neutral-500 uppercase tracking-wider block mb-1">Slug (URL)</label>
+            <input value={form.slug} onChange={e => setF('slug', e.target.value)} className="w-full px-3 py-2 bg-neutral-900 border border-neutral-800 rounded-lg text-sm font-mono" placeholder="auto từ tên nếu bỏ trống" />
+          </div>
+          <div>
+            <label className="text-xs text-neutral-500 uppercase tracking-wider block mb-2">Loại funnel *</label>
+            <div className="grid grid-cols-3 gap-2">
+              {types.map(t => (
+                <button key={t.id} onClick={() => setF('type_key', t.key)}
+                  className={`text-left px-3 py-3 rounded-lg border transition ${form.type_key === t.key ? 'border-primary bg-primary/10' : 'border-neutral-800 hover:border-neutral-700'}`}
+                  style={form.type_key === t.key ? { borderColor: 'var(--color-mission-accent)' } : undefined}>
+                  <div className="text-sm font-medium">{t.name}</div>
+                  <div className="text-[10px] text-neutral-500">{t.description}</div>
+                </button>
+              ))}
+            </div>
+            <p className="text-xs text-neutral-500 mt-2">Thêm/edit types tại <strong>Settings → Funnel Types</strong>.</p>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="text-xs text-neutral-500 uppercase tracking-wider block mb-1">Payment mode</label>
+              <select value={form.payment_mode} onChange={e => setF('payment_mode', e.target.value)} className="w-full px-3 py-2 bg-neutral-900 border border-neutral-800 rounded-lg text-sm">
+                <option value="collect_only">Chỉ collect info (redirect ngoài để thanh toán)</option>
+                <option value="inline_qr">Inline VietQR (hiển thị mã QR ngay trên page)</option>
+                <option value="external_checkout">External checkout (Stripe/SePay)</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-xs text-neutral-500 uppercase tracking-wider block mb-1">Auto-nurture emails</label>
+              <label className="flex items-center gap-2 mt-2">
+                <input type="checkbox" checked={form.auto_nurture} onChange={e => setF('auto_nurture', e.target.checked)} />
+                <span className="text-sm">Gửi email nurture khi có lead mới</span>
+              </label>
+            </div>
+          </div>
+          <div className="flex justify-between pt-4">
+            <button onClick={onCancel} className="text-sm text-neutral-500 hover:text-white">Cancel</button>
+            <button onClick={() => setStep(2)} disabled={!form.name || !form.type_key}
+              style={{ background: 'var(--color-mission-accent)', color: '#000' }}
+              className="inline-flex items-center gap-2 px-4 py-2 font-semibold rounded-lg hover:opacity-90 disabled:opacity-40">
+              Tiếp <ArrowRight className="w-4 h-4" />
+            </button>
+          </div>
         </div>
       )}
 
-      <div className="grid grid-cols-12 gap-4">
-        {/* Left: input form */}
-        <div className="col-span-5 space-y-4 pr-2 max-h-[calc(100vh-200px)] overflow-y-auto">
+      {/* Step 2: Style + prompt */}
+      {step === 2 && (
+        <div className="space-y-6 max-w-3xl">
+          <h2 className="text-lg font-semibold">Bước 2: Style & AI prompt</h2>
+          <StylePicker value={form.style_preset} onChange={v => setF('style_preset', v)} />
           <div>
-            <label className="text-xs text-neutral-500 uppercase tracking-wider">Tên funnel *</label>
-            <input value={name} onChange={e => setName(e.target.value)}
-              className="w-full mt-1 px-3 py-2 bg-neutral-900 border border-neutral-800 rounded-lg text-sm" />
-          </div>
-          <div>
-            <label className="text-xs text-neutral-500 uppercase tracking-wider">Slug (URL)</label>
-            <input value={slug} onChange={e => setSlug(e.target.value)} placeholder="auto từ tên nếu bỏ trống"
-              className="w-full mt-1 px-3 py-2 bg-neutral-900 border border-neutral-800 rounded-lg text-sm font-mono" />
-          </div>
-          <div>
-            <label className="text-xs text-neutral-500 uppercase tracking-wider">Loại funnel</label>
-            <div className="grid grid-cols-3 gap-2 mt-1">
-              {(['sales', 'leads', 'webinar'] as FunnelType[]).map(t => (
-                <button key={t} onClick={() => setType(t)}
-                  className={`px-3 py-2 text-sm rounded-lg border transition ${
-                    type === t ? 'border-primary bg-primary/10' : 'border-neutral-800 hover:border-neutral-700'
-                  }`}
-                  style={type === t ? { borderColor: 'var(--color-mission-accent)', color: 'var(--color-mission-accent)' } : undefined}
-                >{t}</button>
-              ))}
-            </div>
-          </div>
-
-          {/* Common fields */}
-          <TextField label="Tên sản phẩm" k="productName" v={copyInput.productName} onChange={setField} />
-          <TextArea label="Target audience" k="audience" v={copyInput.audience} onChange={setField} rows={2} />
-          <TextArea label="Nỗi đau chính" k="painPoints" v={copyInput.painPoints} onChange={setField} rows={3} />
-          <TextField label="Big promise (headline)" k="bigPromise" v={copyInput.bigPromise} onChange={setField} />
-          <TextArea label="USP (unique selling point)" k="usp" v={copyInput.usp} onChange={setField} rows={2} />
-          <TextField label="CTA text" k="cta" v={copyInput.cta} onChange={setField} placeholder="Đăng ký ngay" />
-          <TextField label="Brand color (hex)" k="brandColor" v={copyInput.brandColor} onChange={setField} placeholder="#B6FF00" />
-
-          {/* Type-specific */}
-          {type === 'sales' && (<>
-            <TextArea label="Offer (mô tả sản phẩm/khóa học)" k="offer" v={copyInput.offer} onChange={setField} rows={3} />
-            <TextField label="Giá (VD: 997.000đ)" k="pricing" v={copyInput.pricing} onChange={setField} />
-            <TextArea label="Bonuses (nếu có)" k="bonuses" v={copyInput.bonuses} onChange={setField} rows={3} />
-            <TextField label="Guarantee (VD: hoàn 100% trong 30 ngày)" k="guarantee" v={copyInput.guarantee} onChange={setField} />
-            <TextArea label="Testimonials (nếu có)" k="testimonials" v={copyInput.testimonials} onChange={setField} rows={3} />
-            <TextField label="Urgency (VD: còn 5 slot, hết hạn 20/08)" k="urgency" v={copyInput.urgency} onChange={setField} />
-          </>)}
-          {type === 'leads' && (<>
-            <TextField label="Tên lead magnet" k="leadMagnetName" v={copyInput.leadMagnetName} onChange={setField} />
-            <TextArea label="Benefit chính của lead magnet" k="leadMagnetBenefit" v={copyInput.leadMagnetBenefit} onChange={setField} rows={3} />
-          </>)}
-          {type === 'webinar' && (<>
-            <TextField label="Tên webinar" k="webinarTitle" v={copyInput.webinarTitle} onChange={setField} />
-            <TextField label="Ngày giờ (VD: 20h 25/08/2026)" k="webinarDate" v={copyInput.webinarDate} onChange={setField} />
-            <TextField label="Speaker" k="webinarSpeaker" v={copyInput.webinarSpeaker} onChange={setField} />
-            <TextArea label="Agenda" k="webinarAgenda" v={copyInput.webinarAgenda} onChange={setField} rows={3} />
-          </>)}
-
-          <button
-            onClick={() => doGenerate(false)}
-            disabled={generating || !copyInput.productName}
-            style={{ background: 'var(--color-mission-accent)', color: '#000' }}
-            className="w-full inline-flex items-center justify-center gap-2 px-4 py-3 font-semibold rounded-lg hover:opacity-90 disabled:opacity-40"
-          >
-            {generating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
-            {html ? 'Regenerate từ đầu' : 'Generate với AI'}
-          </button>
-
-          {html && (
-            <div className="pt-3 border-t border-neutral-800 space-y-2">
-              <label className="text-xs text-neutral-500 uppercase tracking-wider">Iterate — nói cho AI biết muốn sửa gì</label>
-              <textarea value={iterationText} onChange={e => setIterationText(e.target.value)}
-                placeholder='VD: "đổi màu CTA thành xanh dương", "thêm section FAQ", "làm testimonials nổi bật hơn"'
-                rows={3}
-                className="w-full px-3 py-2 bg-neutral-900 border border-neutral-800 rounded-lg text-sm" />
-              <button
-                onClick={() => doGenerate(true)}
-                disabled={generating || !iterationText || !savedId}
-                className="w-full inline-flex items-center justify-center gap-2 px-4 py-2 border border-neutral-700 rounded-lg hover:bg-neutral-800 disabled:opacity-40 text-sm"
-              >
-                {generating ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
-                Iterate {!savedId && '(save trước để iterate)'}
-              </button>
-            </div>
-          )}
-        </div>
-
-        {/* Right: preview */}
-        <div className="col-span-7 border border-neutral-800 rounded-xl overflow-hidden bg-white flex flex-col max-h-[calc(100vh-200px)]">
-          <div className="flex items-center justify-between px-3 py-2 border-b border-neutral-800 bg-neutral-900">
-            <div className="flex gap-1">
-              {(['preview', 'code'] as const).map(m => (
-                <button key={m} onClick={() => setPreviewMode(m)}
-                  className={`px-3 py-1 text-xs rounded transition ${
-                    previewMode === m ? 'bg-neutral-700 text-white' : 'text-neutral-500 hover:text-white'
-                  }`}>{m}</button>
-              ))}
-            </div>
-            {meta && (
-              <span className="text-xs text-neutral-500">
-                {meta.model} · {meta.outputTokens || '?'} tokens
-              </span>
+            <label className="flex items-center gap-2 mb-2">
+              <input type="checkbox" checked={form.use_custom_prompt} onChange={e => setF('use_custom_prompt', e.target.checked)} />
+              <span className="text-sm font-medium">Dùng custom prompt riêng cho funnel này</span>
+            </label>
+            <p className="text-xs text-neutral-500 mb-2">
+              Bỏ tick → dùng system prompt của type (~30k chars skill). Tick → viết prompt ngắn của riêng, AI sáng tạo hơn.
+            </p>
+            {form.use_custom_prompt && (
+              <textarea value={form.custom_prompt} onChange={e => setF('custom_prompt', e.target.value)}
+                className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 rounded-lg text-sm font-mono"
+                rows={8}
+                placeholder="VD: Bạn là copywriter cho brand X. Style trẻ trung, dùng emoji vừa phải. Focus vào transformation story..." />
             )}
           </div>
-          {generating ? (
-            <div className="flex-1 flex items-center justify-center bg-neutral-950 text-neutral-500">
-              <div className="text-center">
-                <Loader2 className="w-8 h-8 animate-spin mx-auto mb-3" style={{ color: 'var(--color-mission-accent)' }} />
-                <p className="text-sm">AI đang generate... (~15-30s)</p>
-              </div>
+          <div className="flex justify-between pt-4">
+            <button onClick={() => setStep(1)} className="text-sm text-neutral-500 hover:text-white">← Quay lại</button>
+            <button onClick={() => setStep(3)}
+              style={{ background: 'var(--color-mission-accent)', color: '#000' }}
+              className="inline-flex items-center gap-2 px-4 py-2 font-semibold rounded-lg hover:opacity-90">
+              Tiếp <ArrowRight className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Step 3: Shared context */}
+      {step === 3 && (
+        <div className="space-y-4 max-w-3xl">
+          <h2 className="text-lg font-semibold">Bước 3: Shared context (dùng cho tất cả steps)</h2>
+          <p className="text-sm text-neutral-500">
+            Nhập thông tin chung về sản phẩm/audience. AI dùng cho MỌI step nên anh không phải điền lại. Format tự do — key: value hoặc mô tả tự nhiên.
+          </p>
+          <textarea value={form.shared_context} onChange={e => setF('shared_context', e.target.value)}
+            className="w-full px-3 py-2 bg-neutral-900 border border-neutral-800 rounded-lg text-sm"
+            rows={14}
+            placeholder={`productName: Khoá AI Marketing 30 Ngày
+audience: Chủ shop online, entrepreneur solo, muốn dùng AI để tăng doanh số
+painPoints: Không biết dùng AI, tốn thời gian viết content, không đủ ngân sách thuê copywriter
+bigPromise: Sau 30 ngày bạn tự viết được content bằng AI, tiết kiệm 20h/tuần
+USP: Chỉ dạy 5 tool AI phải biết, thực hành ngay, có mentor 1-1
+pricing: 1.997.000đ (giá gốc 3.997.000đ), trả góp 3 kỳ
+guarantee: Hoàn 100% trong 14 ngày nếu không hài lòng
+testimonials: Chị Lan tăng đơn 3x sau 2 tuần; Anh Tuấn tự viết được 30 posts/tháng thay vì thuê`}
+          />
+          <div className="flex justify-between pt-4">
+            <button onClick={() => setStep(2)} className="text-sm text-neutral-500 hover:text-white">← Quay lại</button>
+            <button onClick={create} disabled={saving}
+              style={{ background: 'var(--color-mission-accent)', color: '#000' }}
+              className="inline-flex items-center gap-2 px-5 py-2 font-semibold rounded-lg hover:opacity-90 disabled:opacity-40">
+              {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+              Tạo funnel
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function parseSharedContext(text: string): Record<string, any> {
+  // Parse "key: value" lines into object; fallback to { raw: text }
+  const obj: Record<string, any> = {}
+  const lines = text.split('\n')
+  for (const line of lines) {
+    const m = line.match(/^([a-zA-Z_][a-zA-Z0-9_]*)\s*:\s*(.+)$/)
+    if (m) obj[m[1]] = m[2].trim()
+  }
+  if (Object.keys(obj).length === 0 && text.trim()) obj.notes = text.trim()
+  return obj
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// FUNNEL DETAIL (step timeline)
+// ═══════════════════════════════════════════════════════════════════════════
+function FunnelDetailView({ id, onBack }: { id: string; onBack: () => void }) {
+  const [funnel, setFunnel] = useState<FunnelDetail | null>(null)
+  const [selectedStepId, setSelectedStepId] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    try {
+      const f = await api<FunnelDetail>(`/api/funnel-flows?id=${id}`)
+      setFunnel(f)
+      if (!selectedStepId && f.steps[0]) setSelectedStepId(f.steps[0].id)
+    } catch (e: any) { setError(e.message) }
+    finally { setLoading(false) }
+  }, [id, selectedStepId])
+  useEffect(() => { load() }, [id])
+
+  const suggest = async () => {
+    if (!funnel) return
+    try {
+      await api(`/api/funnel-steps?action=suggest&funnel_id=${funnel.id}`, { method: 'POST' })
+      load()
+    } catch (e: any) { alert(e.message) }
+  }
+
+  const publish = async () => {
+    if (!funnel) return
+    await api(`/api/funnel-flows?action=publish&id=${funnel.id}`, { method: 'POST' })
+    load()
+  }
+
+  if (loading) return <div className="text-center py-16 text-neutral-500"><Loader2 className="w-6 h-6 animate-spin mx-auto" /></div>
+  if (!funnel) return <div className="text-center py-16 text-red-400">{error || 'Not found'}</div>
+
+  const selectedStep = funnel.steps.find(s => s.id === selectedStepId) || null
+
+  return (
+    <div className="max-w-full px-4 py-4">
+      {/* Header */}
+      <div className="flex items-center justify-between border-b border-neutral-800 pb-3 mb-4">
+        <div className="flex items-center gap-3">
+          <button onClick={onBack} className="p-2 hover:bg-neutral-800 rounded"><ChevronLeft className="w-5 h-5" /></button>
+          <div>
+            <div className="flex items-center gap-2">
+              <h1 className="text-lg font-bold">{funnel.name}</h1>
+              <span className={`text-xs px-2 py-0.5 rounded border ${
+                funnel.status === 'published' ? 'bg-green-500/10 text-green-400 border-green-500/30' :
+                'bg-amber-500/10 text-amber-400 border-amber-500/30'
+              }`}>{funnel.status}</span>
             </div>
-          ) : !html ? (
-            <div className="flex-1 flex items-center justify-center bg-neutral-950 text-neutral-600">
-              <div className="text-center px-8">
-                <Eye className="w-10 h-10 mx-auto mb-3 opacity-30" />
-                <p className="text-sm">Điền form bên trái + bấm Generate để xem preview</p>
-              </div>
+            <div className="text-xs text-neutral-500 font-mono">/f/{funnel.slug} · {funnel.type_key}</div>
+          </div>
+        </div>
+        <div className="flex gap-2">
+          {funnel.status === 'published' && (
+            <a href={`/f/${funnel.slug}`} target="_blank" rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 text-sm px-3 py-1.5 border border-neutral-700 rounded-lg hover:bg-neutral-800">
+              <ExternalLink className="w-3.5 h-3.5" /> View live
+            </a>
+          )}
+          <button onClick={publish} disabled={funnel.steps.some(s => !s.html)}
+            style={{ background: 'var(--color-mission-accent)', color: '#000' }}
+            className="inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-lg hover:opacity-90 disabled:opacity-40" title={funnel.steps.some(s => !s.html) ? 'Cần generate HTML cho tất cả steps' : ''}>
+            <Send className="w-4 h-4" /> {funnel.status === 'published' ? 'Update live' : 'Publish'}
+          </button>
+        </div>
+      </div>
+
+      {/* Step timeline */}
+      {funnel.steps.length === 0 ? (
+        <div className="text-center py-16 border border-dashed border-neutral-800 rounded-xl">
+          <Layers className="w-10 h-10 mx-auto mb-3 text-neutral-700" />
+          <p className="text-neutral-500 mb-4">Funnel này chưa có step nào.</p>
+          <button onClick={suggest}
+            style={{ background: 'var(--color-mission-accent)', color: '#000' }}
+            className="inline-flex items-center gap-2 px-4 py-2 font-semibold rounded-lg hover:opacity-90">
+            <Wand2 className="w-4 h-4" /> Suggest steps từ type
+          </button>
+        </div>
+      ) : (
+        <>
+          {/* Timeline nav */}
+          <div className="flex items-center gap-2 mb-4 pb-3 border-b border-neutral-800 overflow-x-auto">
+            {funnel.steps.map((s, i) => (
+              <React.Fragment key={s.id}>
+                <button onClick={() => setSelectedStepId(s.id)}
+                  className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-sm whitespace-nowrap transition ${
+                    selectedStepId === s.id ? '' : 'border-neutral-800 hover:border-neutral-700'
+                  }`}
+                  style={selectedStepId === s.id ? { borderColor: 'var(--color-mission-accent)', background: 'var(--color-mission-accent)10' } : undefined}>
+                  <span className="w-5 h-5 rounded-full bg-neutral-800 text-xs flex items-center justify-center">{s.step_number}</span>
+                  <span>{s.name}</span>
+                  {s.html && <Check className="w-3 h-3 text-green-400" />}
+                </button>
+                {i < funnel.steps.length - 1 && <ArrowRight className="w-3 h-3 text-neutral-700" />}
+              </React.Fragment>
+            ))}
+          </div>
+
+          {/* Step editor */}
+          {selectedStep && <StepEditor step={selectedStep} funnel={funnel} onSaved={load} />}
+        </>
+      )}
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// STEP EDITOR
+// ═══════════════════════════════════════════════════════════════════════════
+function StepEditor({ step, funnel, onSaved }: { step: StepDetail; funnel: FunnelDetail; onSaved: () => void }) {
+  const [mode, setMode] = useState<'ai_draft' | 'ai_direct' | 'imported' | 'blank'>(step.content_source)
+  const [formulas, setFormulas] = useState<Formula[]>([])
+  const [formulaKey, setFormulaKey] = useState(step.copy_formula_key || 'pas')
+  const [rawInput, setRawInput] = useState(step.copy_raw_input || '')
+  const [copyDraft, setCopyDraft] = useState<CopyDraft>(step.copy_draft || { blocks: [] })
+  const [importHtml, setImportHtml] = useState('')
+  const [importConfig, setImportConfig] = useState({ strip_external_scripts: true, override_form_action: true, auto_tag_ctas: true })
+  const [busy, setBusy] = useState<false | 'draft' | 'approve' | 'import' | 'save'>(false)
+  const [error, setError] = useState<string | null>(null)
+  const [previewMode, setPreviewMode] = useState<'preview' | 'code'>('preview')
+
+  useEffect(() => {
+    api<{ formulas: Formula[] }>('/api/copy-formulas').then(r => setFormulas(r.formulas))
+  }, [])
+
+  useEffect(() => {
+    setMode(step.content_source)
+    setFormulaKey(step.copy_formula_key || 'pas')
+    setRawInput(step.copy_raw_input || '')
+    setCopyDraft(step.copy_draft || { blocks: [] })
+    setError(null)
+  }, [step.id])
+
+  const draftAI = async () => {
+    setError(null); setBusy('draft')
+    try {
+      const r = await api<{ draft: CopyDraft }>(`/api/funnel-steps?action=draft&id=${step.id}`, {
+        method: 'POST',
+        body: JSON.stringify({ formula_key: formulaKey, raw_input: rawInput }),
+      })
+      setCopyDraft(r.draft)
+      onSaved()
+    } catch (e: any) { setError(e.message) }
+    finally { setBusy(false) }
+  }
+
+  const approve = async () => {
+    setError(null); setBusy('approve')
+    try {
+      await api(`/api/funnel-steps?action=approve&id=${step.id}`, {
+        method: 'POST',
+        body: JSON.stringify({ copy_draft: copyDraft }),
+      })
+      onSaved()
+    } catch (e: any) { setError(e.message) }
+    finally { setBusy(false) }
+  }
+
+  const importHtmlAction = async () => {
+    setError(null); setBusy('import')
+    try {
+      await api(`/api/funnel-steps?action=import&id=${step.id}`, {
+        method: 'POST',
+        body: JSON.stringify({ html: importHtml, config: importConfig }),
+      })
+      onSaved()
+      setImportHtml('')
+    } catch (e: any) { setError(e.message) }
+    finally { setBusy(false) }
+  }
+
+  return (
+    <div className="grid grid-cols-12 gap-4">
+      {/* LEFT: Editor panel */}
+      <div className="col-span-6 space-y-4 max-h-[calc(100vh-260px)] overflow-y-auto pr-2">
+        <div className="border border-neutral-800 rounded-lg p-3">
+          <h3 className="text-sm font-semibold mb-2">Step: {step.name}</h3>
+          <div className="text-xs text-neutral-500">
+            /f/{funnel.slug}/{step.slug} · page_type: {step.page_type} · form: {step.has_form ? `${step.form_mode} (${step.form_fields.length} fields)` : 'none'}
+          </div>
+        </div>
+
+        {/* Mode picker */}
+        <div>
+          <label className="text-xs text-neutral-500 uppercase tracking-wider block mb-2">Content source</label>
+          <div className="grid grid-cols-4 gap-2">
+            {[
+              { key: 'ai_draft', label: 'AI Draft', icon: Wand2, hint: '2 bước: draft → approve' },
+              { key: 'ai_direct', label: 'AI Direct', icon: Zap, hint: '1 bước: input → HTML' },
+              { key: 'imported', label: 'Import HTML', icon: FileCode2, hint: 'Paste HTML từ nguồn khác' },
+              { key: 'blank', label: 'Blank', icon: Edit2, hint: 'Viết HTML tay' },
+            ].map(m => (
+              <button key={m.key} onClick={() => setMode(m.key as any)}
+                className={`text-left px-2 py-2 rounded-lg border transition ${mode === m.key ? '' : 'border-neutral-800 hover:border-neutral-700'}`}
+                style={mode === m.key ? { borderColor: 'var(--color-mission-accent)' } : undefined}>
+                <div className="flex items-center gap-1 text-xs font-medium"><m.icon className="w-3 h-3" />{m.label}</div>
+                <div className="text-[10px] text-neutral-500 mt-1">{m.hint}</div>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {error && (
+          <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-xs text-red-400 flex justify-between gap-2">
+            <span className="break-all">{error}</span>
+            <button onClick={() => setError(null)}><X className="w-3 h-3" /></button>
+          </div>
+        )}
+
+        {/* AI Draft mode */}
+        {mode === 'ai_draft' && (
+          <>
+            <div>
+              <label className="text-xs text-neutral-500 uppercase tracking-wider block mb-1">Công thức viết</label>
+              <select value={formulaKey} onChange={e => setFormulaKey(e.target.value)}
+                className="w-full px-3 py-2 bg-neutral-900 border border-neutral-800 rounded-lg text-sm">
+                {formulas.map(f => <option key={f.key} value={f.key}>{f.name}</option>)}
+              </select>
+              <p className="text-xs text-neutral-500 mt-1">{formulas.find(f => f.key === formulaKey)?.description}</p>
             </div>
-          ) : previewMode === 'preview' ? (
-            <iframe srcDoc={html} className="flex-1 w-full bg-white" title="Preview" sandbox="allow-scripts allow-same-origin" />
-          ) : (
-            <pre className="flex-1 overflow-auto p-3 bg-neutral-950 text-neutral-300 text-xs font-mono whitespace-pre-wrap">{html}</pre>
+            <div>
+              <label className="text-xs text-neutral-500 uppercase tracking-wider block mb-1">Raw input cho step này (optional)</label>
+              <textarea value={rawInput} onChange={e => setRawInput(e.target.value)}
+                className="w-full px-3 py-2 bg-neutral-900 border border-neutral-800 rounded-lg text-sm" rows={5}
+                placeholder="Nếu bỏ trống, AI dùng shared_context của funnel làm chính. Điền thêm nếu step này cần info riêng." />
+            </div>
+            <button onClick={draftAI} disabled={busy !== false}
+              style={{ background: 'var(--color-mission-accent)', color: '#000' }}
+              className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 font-semibold rounded-lg hover:opacity-90 disabled:opacity-40">
+              {busy === 'draft' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />}
+              {copyDraft.blocks?.length ? 'Regenerate draft' : 'Draft nội dung với AI'}
+            </button>
+
+            {copyDraft.blocks?.length > 0 && (
+              <>
+                <div className="border-t border-neutral-800 pt-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <h4 className="text-sm font-semibold">Content draft ({copyDraft.blocks.length} blocks)</h4>
+                    {step.copy_approved && <span className="text-xs text-green-400 flex items-center gap-1"><Check className="w-3 h-3" />Approved</span>}
+                  </div>
+                  <ContentDraftEditor value={copyDraft} onChange={setCopyDraft} />
+                </div>
+                <button onClick={approve} disabled={busy !== false}
+                  className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 border border-green-500/50 text-green-400 rounded-lg hover:bg-green-500/10 disabled:opacity-40">
+                  {busy === 'approve' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                  Duyệt content → tạo HTML
+                </button>
+              </>
+            )}
+          </>
+        )}
+
+        {/* Import mode */}
+        {mode === 'imported' && (
+          <>
+            <div>
+              <label className="text-xs text-neutral-500 uppercase tracking-wider block mb-1">HTML nguồn</label>
+              <textarea value={importHtml} onChange={e => setImportHtml(e.target.value)}
+                className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 rounded-lg text-xs font-mono"
+                rows={12} placeholder="Paste HTML từ Landingi, Systeme, Framer export, v.v..." />
+            </div>
+            <div className="space-y-2 border border-neutral-800 rounded-lg p-3">
+              <label className="text-xs text-neutral-500 uppercase tracking-wider block">Config</label>
+              <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={importConfig.strip_external_scripts} onChange={e => setImportConfig(c => ({ ...c, strip_external_scripts: e.target.checked }))} />Strip external scripts (khuyến nghị — an toàn)</label>
+              <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={importConfig.override_form_action} onChange={e => setImportConfig(c => ({ ...c, override_form_action: e.target.checked }))} />Override form action → /api/f/submit</label>
+              <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={importConfig.auto_tag_ctas} onChange={e => setImportConfig(c => ({ ...c, auto_tag_ctas: e.target.checked }))} />Auto tag buttons làm CTA (data-cta="1")</label>
+              {!importConfig.strip_external_scripts && (
+                <p className="text-xs text-amber-400 flex items-center gap-1 mt-1">⚠ Giữ external scripts có thể vỡ page (CSP) hoặc leak data.</p>
+              )}
+            </div>
+            <button onClick={importHtmlAction} disabled={busy !== false || !importHtml.trim()}
+              style={{ background: 'var(--color-mission-accent)', color: '#000' }}
+              className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 font-semibold rounded-lg hover:opacity-90 disabled:opacity-40">
+              {busy === 'import' ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileCode2 className="w-4 h-4" />}
+              Import HTML
+            </button>
+          </>
+        )}
+
+        {/* AI Direct / Blank — MVP placeholder */}
+        {(mode === 'ai_direct' || mode === 'blank') && (
+          <div className="p-4 border border-dashed border-neutral-800 rounded-lg text-xs text-neutral-500 text-center">
+            {mode === 'ai_direct' ? 'AI Direct (1-step) coming soon. Hiện dùng AI Draft (2-step) — chất lượng tốt hơn.' : 'Blank mode: viết HTML tay coming soon.'}
+          </div>
+        )}
+      </div>
+
+      {/* RIGHT: HTML Preview */}
+      <div className="col-span-6 border border-neutral-800 rounded-xl overflow-hidden bg-white flex flex-col max-h-[calc(100vh-260px)]">
+        <div className="flex items-center justify-between px-3 py-2 border-b border-neutral-800 bg-neutral-900">
+          <div className="flex gap-1">
+            {(['preview', 'code'] as const).map(m => (
+              <button key={m} onClick={() => setPreviewMode(m)}
+                className={`px-3 py-1 text-xs rounded ${previewMode === m ? 'bg-neutral-700 text-white' : 'text-neutral-500 hover:text-white'}`}>{m}</button>
+            ))}
+          </div>
+          {step.html_generated_from_copy_at && (
+            <span className="text-xs text-neutral-500">Generated {new Date(step.html_generated_from_copy_at).toLocaleString('vi-VN')}</span>
           )}
         </div>
+        {busy === 'approve' || busy === 'import' ? (
+          <div className="flex-1 flex items-center justify-center bg-neutral-950 text-neutral-500">
+            <div className="text-center">
+              <Loader2 className="w-8 h-8 animate-spin mx-auto mb-3" style={{ color: 'var(--color-mission-accent)' }} />
+              <p className="text-sm">Generating HTML...</p>
+            </div>
+          </div>
+        ) : !step.html ? (
+          <div className="flex-1 flex items-center justify-center bg-neutral-950 text-neutral-600">
+            <div className="text-center px-8">
+              <Eye className="w-10 h-10 mx-auto mb-3 opacity-30" />
+              <p className="text-sm">Bấm "Duyệt content → tạo HTML" hoặc "Import HTML" để xem preview</p>
+            </div>
+          </div>
+        ) : previewMode === 'preview' ? (
+          <iframe srcDoc={step.html} className="flex-1 w-full bg-white" title="Preview" sandbox="allow-scripts allow-same-origin" />
+        ) : (
+          <pre className="flex-1 overflow-auto p-3 bg-neutral-950 text-neutral-300 text-xs font-mono whitespace-pre-wrap">{step.html}</pre>
+        )}
       </div>
     </div>
   )
-}
-
-function TextField({ label, k, v, onChange, placeholder }: { label: string; k: string; v?: string; onChange: (k: string, v: string) => void; placeholder?: string }) {
-  return (
-    <div>
-      <label className="text-xs text-neutral-500 uppercase tracking-wider">{label}</label>
-      <input value={v || ''} onChange={e => onChange(k, e.target.value)} placeholder={placeholder}
-        className="w-full mt-1 px-3 py-2 bg-neutral-900 border border-neutral-800 rounded-lg text-sm" />
-    </div>
-  )
-}
-function TextArea({ label, k, v, onChange, rows = 2 }: { label: string; k: string; v?: string; onChange: (k: string, v: string) => void; rows?: number }) {
-  return (
-    <div>
-      <label className="text-xs text-neutral-500 uppercase tracking-wider">{label}</label>
-      <textarea value={v || ''} onChange={e => onChange(k, e.target.value)} rows={rows}
-        className="w-full mt-1 px-3 py-2 bg-neutral-900 border border-neutral-800 rounded-lg text-sm resize-y" />
-    </div>
-  )
-}
-
-// ══════════════════════════════════════════════════════════════════════════
-// ROOT: switches between list + builder
-// ══════════════════════════════════════════════════════════════════════════
-export default function AIFunnelsView() {
-  const [mode, setMode] = useState<'list' | 'builder'>('list')
-  const [editId, setEditId] = useState<string | null>(null)
-
-  if (mode === 'builder') {
-    return <FunnelBuilder id={editId} onBack={() => { setMode('list'); setEditId(null) }} />
-  }
-  return <FunnelsList
-    onNew={() => { setEditId(null); setMode('builder') }}
-    onEdit={id => { setEditId(id); setMode('builder') }}
-  />
 }

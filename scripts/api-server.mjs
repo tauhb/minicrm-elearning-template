@@ -1013,6 +1013,41 @@ async function handleAIGenerate(req, res) {
   } catch (e) { return res.status(500).json({ error: e.message }) }
 }
 
+// --- Generic dynamic loader for TS endpoints ---
+// Uses tsx --import to allow importing .ts files at runtime.
+// Maps /api/foo/bar → api/foo/bar.ts OR api/foo/bar/index.ts
+async function handleViaImport(req, res, urlPath) {
+  // Strip query string
+  const cleanPath = urlPath.split('?')[0]  // e.g. /api/funnel-steps
+  const relPath = cleanPath.replace(/^\/api\//, '')  // funnel-steps
+  const parts = relPath.split('/').filter(Boolean)
+
+  // Try: api/<parts>.ts, api/<parts>/index.ts
+  const { existsSync } = await import('node:fs')
+  const { resolve: pathResolve } = await import('node:path')
+
+  const tryPaths = [
+    pathResolve('api', ...parts) + '.ts',
+    pathResolve('api', ...parts, 'index.ts'),
+  ]
+  const found = tryPaths.find(p => existsSync(p))
+  if (!found) {
+    return res.status(404).json({ error: `No handler for ${cleanPath}` })
+  }
+
+  try {
+    const mod = await import(found + `?t=${Date.now()}`)  // cache-bust for dev hot-reload
+    if (typeof mod.default !== 'function') {
+      return res.status(500).json({ error: `${found} has no default export function` })
+    }
+    // Adapt: mockReq → VercelRequest-shape; res is already compatible
+    await mod.default(req, res)
+  } catch (e) {
+    console.error(`[handleViaImport ${cleanPath}]`, e)
+    return res.status(500).json({ error: e.message })
+  }
+}
+
 // --- Copy Formulas CRUD ---
 async function handleCopyFormulas(req, res) {
   const user = await assertAdmin(req, res); if (!user) return
@@ -1657,15 +1692,19 @@ const server = http.createServer(async (req, nodeRes) => {
       await handleFunnelTypes(mockReq, res)
     } else if (req.url?.startsWith('/api/copy-formulas')) {
       await handleCopyFormulas(mockReq, res)
+    } else if (req.url?.startsWith('/api/funnel-flows') || req.url?.startsWith('/api/funnel-steps')) {
+      await handleViaImport(mockReq, res, req.url)
     } else if (req.url === '/api/funnels/generate') {
       await handleFunnelGenerate(mockReq, res)
     } else if (req.url?.startsWith('/api/funnels/save')) {
       await handleFunnelSave(mockReq, res)
     } else if (req.url?.startsWith('/api/f/render')) {
-      await handleFunnelPublicRender(mockReq, res, nodeRes)
-      return  // handler wrote directly to nodeRes
+      // Dynamic import — writes to res directly
+      await handleViaImport(mockReq, res, req.url)
+    } else if (req.url === '/api/f/submit') {
+      await handleViaImport(mockReq, res, req.url)
     } else if (req.url === '/api/f/track') {
-      await handleFunnelTrack(mockReq, res)
+      await handleViaImport(mockReq, res, req.url)
     } else if (req.url === '/api/email/send') {
       await handleEmailSend(mockReq, res)
     } else if (req.url === '/api/email/broadcast') {

@@ -11,10 +11,13 @@ export default defineConfig({
       '/f': {
         target: 'http://localhost:3001',
         rewrite: (path) => {
-          // /f/khoa-ai-marketing → /api/f/render?slug=khoa-ai-marketing
-          const m = path.match(/^\/f\/([^/?]+)/)
+          // /f/khoa-ai-marketing              → /api/f/render?funnel=khoa-ai-marketing
+          // /f/khoa-ai-marketing/landing      → /api/f/render?funnel=khoa-ai-marketing&step=landing
+          const m = path.match(/^\/f\/([^/?]+)(?:\/([^/?]+))?/)
           if (!m) return path
-          return `/api/f/render?slug=${encodeURIComponent(m[1])}`
+          const funnel = encodeURIComponent(m[1])
+          const step = m[2] ? `&step=${encodeURIComponent(m[2])}` : ''
+          return `/api/f/render?funnel=${funnel}${step}`
         },
       },
     },

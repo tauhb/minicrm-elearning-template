@@ -11,7 +11,7 @@ import OrdersView from './OrdersView'
 import ProductsLayout from './ProductsLayout'
 import SettingsView from './SettingsView'
 import AffiliatesView from './AffiliatesView'
-import AIFunnelsView from './AIFunnelsView'
+const AIFunnelsView = React.lazy(() => import('./AIFunnelsView'))
 
 const NAV_ITEMS = [
   { to: '/admin',          label: 'Tổng quan',      icon: LayoutDashboard, end: true },

@@ -1,11 +1,10 @@
-// api/funnels/save.ts — CRUD for generated funnels (admin only)
-//
-// GET /api/funnels/save              → list all funnels
-// GET /api/funnels/save?id=xxx       → get one
-// POST /api/funnels/save             → create or upsert (body has all fields)
-// POST /api/funnels/save?action=publish&id=xxx → publish (status=published, set published_at)
-// POST /api/funnels/save?action=archive&id=xxx → archive
-// DELETE /api/funnels/save?id=xxx    → delete
+// api/funnel-flows/index.ts — CRUD for funnel_flows (admin only)
+//   GET  /api/funnel-flows              → list all
+//   GET  /api/funnel-flows?id=xxx       → get one with steps aggregated
+//   POST /api/funnel-flows              → create/upsert
+//   POST /api/funnel-flows?action=publish&id=xxx   → publish all steps atomically
+//   POST /api/funnel-flows?action=archive&id=xxx   → archive
+//   DELETE /api/funnel-flows?id=xxx     → delete (cascade to steps)
 
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { createClient } from '@supabase/supabase-js'
@@ -17,10 +16,8 @@ const CORS = {
 }
 
 function slugify(s: string): string {
-  return s.toLowerCase().normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
-    .replace(/đ/g, 'd').replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '').slice(0, 60) || 'funnel'
+  return s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/đ/g, 'd').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'funnel'
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -54,77 +51,68 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     if (req.method === 'GET') {
       if (id) {
-        const { data, error } = await admin.from('generated_funnels').select('*').eq('id', id).single()
+        const { data, error } = await admin.from('funnel_flows').select('*').eq('id', id).single()
         if (error) return res.status(404).json({ error: error.message })
-        return res.json(data)
+        const { data: steps } = await admin.from('funnel_steps')
+          .select('*').eq('funnel_id', id).order('step_number')
+        return res.json({ ...data, steps: steps || [] })
       }
-      const { data } = await admin.from('generated_funnels')
-        .select('id, slug, name, type, status, visits, cta_clicks, form_submits, created_at, updated_at, published_at')
+      const { data } = await admin.from('funnel_flows')
+        .select('id, slug, name, type_key, status, style_preset, custom_domain, created_at, updated_at, published_at')
         .order('updated_at', { ascending: false })
       return res.json({ funnels: data || [] })
     }
 
     if (req.method === 'DELETE') {
       if (!id) return res.status(400).json({ error: 'id required' })
-      const { error } = await admin.from('generated_funnels').delete().eq('id', id)
+      const { error } = await admin.from('funnel_flows').delete().eq('id', id)
       if (error) return res.status(500).json({ error: error.message })
       return res.json({ success: true })
     }
 
     if (req.method === 'POST') {
-      // Publish / archive actions
       if (action === 'publish' && id) {
-        const { data, error } = await admin.from('generated_funnels').update({
-          status: 'published',
-          published_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
+        const { data, error } = await admin.from('funnel_flows').update({
+          status: 'published', published_at: new Date().toISOString(), updated_at: new Date().toISOString(),
         }).eq('id', id).select().single()
         if (error) return res.status(500).json({ error: error.message })
         return res.json(data)
       }
       if (action === 'archive' && id) {
-        const { data, error } = await admin.from('generated_funnels').update({
+        const { data, error } = await admin.from('funnel_flows').update({
           status: 'archived', updated_at: new Date().toISOString(),
         }).eq('id', id).select().single()
         if (error) return res.status(500).json({ error: error.message })
         return res.json(data)
       }
 
-      // Regular create/upsert
       const body = req.body || {}
-      if (!body.name || !body.type) return res.status(400).json({ error: 'name + type required' })
-
+      if (!body.name) return res.status(400).json({ error: 'name required' })
+      if (!body.type_key) return res.status(400).json({ error: 'type_key required' })
       const slug = body.slug || slugify(body.name)
 
-      // Check slug uniqueness (if new or slug changed)
-      if (!body.id) {
-        const { data: existing } = await admin.from('generated_funnels').select('id').eq('slug', slug).maybeSingle()
-        if (existing) return res.status(409).json({ error: `Slug "${slug}" đã tồn tại` })
-      }
-
-      const payload = {
-        slug,
-        name: body.name,
-        type: body.type,
+      const payload: any = {
+        slug, name: body.name, type_key: body.type_key,
         status: body.status || 'draft',
-        copy_input: body.copy_input || {},
-        html: body.html || null,
-        generation_meta: body.generation_meta || {},
+        style_preset: body.style_preset || {},
+        shared_context: body.shared_context || {},
+        payment_mode: body.payment_mode || 'collect_only',
+        auto_nurture: body.auto_nurture !== false,
+        custom_prompt: body.custom_prompt || null,
         custom_domain: body.custom_domain || null,
         created_by: user.id,
         updated_at: new Date().toISOString(),
       }
 
       if (body.id) {
-        // Update
-        const { data, error } = await admin.from('generated_funnels')
+        const { data, error } = await admin.from('funnel_flows')
           .update(payload).eq('id', body.id).select().single()
         if (error) return res.status(500).json({ error: error.message })
         return res.json(data)
       } else {
-        // Insert
-        const { data, error } = await admin.from('generated_funnels')
-          .insert(payload).select().single()
+        const { data: dupe } = await admin.from('funnel_flows').select('id').eq('slug', slug).maybeSingle()
+        if (dupe) return res.status(409).json({ error: `Slug "${slug}" đã tồn tại` })
+        const { data, error } = await admin.from('funnel_flows').insert(payload).select().single()
         if (error) return res.status(500).json({ error: error.message })
         return res.json(data)
       }

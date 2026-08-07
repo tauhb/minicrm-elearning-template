@@ -4,8 +4,8 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "concurrently \"node scripts/api-server.mjs\" \"vite\"",
-    "dev:api": "node scripts/api-server.mjs",
+    "dev": "concurrently \"node --import tsx scripts/api-server.mjs\" \"vite\"",
+    "dev:api": "node --import tsx scripts/api-server.mjs",
     "build": "vite build",
     "preview": "vite preview",
     "lint": "tsc --noEmit",
