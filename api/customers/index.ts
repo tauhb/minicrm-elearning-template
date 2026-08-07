@@ -193,7 +193,7 @@ async function logAudit(
       action,
       target_type: 'customer',
       target_id: targetId,
-      metadata,
+      changes: metadata,  // schema uses `changes`; keeping helper param name for callers
     })
   } catch (e: any) {
     // Audit failure should not break the primary action
