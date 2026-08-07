@@ -116,6 +116,112 @@ Hiển thị 7 checks + gợi ý fix nếu fail.
 2. Edit từng chỗ với text replacement phù hợp
 3. Vite hot-reload — bạn thấy ngay
 
+## AI Funnel Builder (mới)
+
+### 11. Tạo funnel Sales với AI
+
+**Bạn nói:**
+> "Tạo funnel Sales cho khoá 'AI Marketing 30 Ngày', giá 1.997k, target là chủ shop online muốn tăng doanh số bằng AI. Guarantee 14 ngày hoàn tiền."
+
+**Agent làm:**
+1. Vào `/admin/settings` → Funnel Types → check "Sales Funnel" có sẵn
+2. `/admin` → AI Funnels → "+ Tạo funnel mới"
+3. Fill wizard: name, slug auto, type=sales, style vibe (khuyên "minimal" cho education)
+4. Shared context: nhập offer/audience/pain/USP/guarantee
+5. Bấm "Tạo funnel" → auto có 4 steps ready (Landing/Order/Upsell/Thank-you)
+6. Click Landing step → chọn formula PAS → "Draft nội dung với AI"
+7. Review block outline → "Duyệt content → tạo HTML"
+8. Repeat cho Order/Upsell/Thank-you
+9. Bấm "Publish" → funnel live tại `/f/<slug>`
+
+### 12. Kết nối SePay cho funnel
+
+**Bạn nói:**
+> "Setup thanh toán SePay cho funnel này, bank Vietcombank số 0123456789, chủ TK Nguyễn Văn A"
+
+**Agent làm:**
+1. Vào funnel detail → bấm nút "Payment" (top right header)
+2. Chọn mode: "Inline VietQR (SePay)"
+3. Fill: bank + account + holder + fixed_amount
+4. Copy webhook URL từ portal → cho user dán vào SePay dashboard
+5. User paste secret từ SePay → portal encrypt AES-GCM lưu
+6. Save
+7. Chỉnh Order step: form fields (name/email/phone), form_success_step_slug='thank-you'
+
+### 13. Preview funnel end-to-end trước publish
+
+**Bạn nói:**
+> "Cho tôi xem thử funnel này chạy như thế nào trước khi publish"
+
+**Agent làm:**
+- Bấm "Preview flow" button trong FunnelDetail header
+- Modal iframe hiện step 1, click CTA hoặc submit form → nhảy step 2, 3, 4
+- Form không thực sự lưu, chỉ mô phỏng navigation
+
+### 14. Import HTML từ nguồn khác
+
+**Bạn nói:**
+> "Tôi có landing page từ Framer, muốn import vào step Landing"
+
+**Agent làm:**
+1. Vào step Landing → Setting tab → chọn "Import HTML"
+2. Paste HTML
+3. Config: strip external scripts (recommend on), override form action, auto tag CTAs
+4. Bấm Import → portal transform + save
+
+### 15. Đổi công thức viết cho 1 step
+
+**Bạn nói:**
+> "Đổi step Landing sang formula BAB (Before-After-Bridge) thay vì PAS"
+
+**Agent làm:**
+1. Click step Landing → Setting tab
+2. Đổi Formula dropdown sang "BAB"
+3. Bấm "Regenerate draft" → AI redo với BAB structure
+4. Sang Copy outline tab → review → approve
+
+### 16. Thêm tag cho leads từ funnel
+
+**Bạn nói:**
+> "Thêm tag 'khoa-ai-marketing' và 'q4-2026' cho tất cả leads từ funnel này"
+
+**Agent làm:**
+- Vào wizard hoặc funnel settings → nhập 2 tag vào Tags chip input
+- Enter/comma để add
+- Sau save, mọi form submit tự merge tags vào lead
+
+### 17. Add/remove/reorder steps
+
+**Bạn nói:**
+> "Xoá step Upsell khỏi funnel này, thêm step Order Bump giữa Landing và Order"
+
+**Agent làm:**
+1. Timeline: click icon ⚙️ trên step Upsell → Delete
+2. Bấm "+ Add step" → chọn template "Custom" hoặc "Landing" → name="Order Bump", slug="order-bump"
+3. Icon ⚙️ trên step mới → Move up/down đến vị trí giữa Landing và Order
+
+### 18. Sửa system prompt của funnel type
+
+**Bạn nói:**
+> "Tôi muốn Sales Funnel type luôn viết theo giọng thân thiện hơn"
+
+**Agent làm:**
+1. Settings → Funnel Types → Edit "Sales Funnel"
+2. Sang tab "System prompt" → thêm instruction "Viết giọng thân thiện, dùng ngôi thứ 2 'bạn', tránh sales-y"
+3. Save. Từ giờ tất cả funnel Sales mới tạo sẽ dùng prompt này.
+
+### 19. Tạo funnel type mới
+
+**Bạn nói:**
+> "Tạo type mới 'Webinar Funnel' với 3 steps: Register / Confirmation / Post-webinar Offer"
+
+**Agent làm:**
+1. Settings → Funnel Types → "+ Add type"
+2. Name="Webinar Funnel", key="webinar", icon="video"
+3. System prompt: copy nội dung webinar framework
+4. Suggested steps tab: define 3 steps với page_type + form config
+5. Save. User có thể chọn type này khi tạo funnel
+
 ## Nâng Cao — Câu Lệnh Ít Phổ Biến Hơn
 
 ### "Thêm 1 theme mới của riêng tôi"

@@ -1754,6 +1754,8 @@ const server = http.createServer(async (req, nodeRes) => {
       await handleViaImport(mockReq, res, req.url)
     } else if (req.url === '/api/f/sepay-webhook') {
       await handleViaImport(mockReq, res, req.url)
+    } else if (req.url?.startsWith('/api/f/preview')) {
+      await handleViaImport(mockReq, res, req.url)
     } else if (req.url === '/api/email/send') {
       await handleEmailSend(mockReq, res)
     } else if (req.url === '/api/email/broadcast') {

@@ -4,6 +4,8 @@ import { supabase } from '../../services/supabase'
 import { StylePicker, StylePreset } from './funnels/StylePicker'
 import { ContentDraftEditor, CopyDraft } from './funnels/ContentDraftEditor'
 import { PaymentConfigDrawer } from './funnels/PaymentConfigDrawer'
+import { PreviewFlowModal } from './funnels/PreviewFlowModal'
+import { FormFieldsEditor, FormField } from './funnels/FormFieldsEditor'
 
 type Status = 'draft' | 'published' | 'archived'
 
@@ -412,6 +414,7 @@ function FunnelDetailView({ id, onBack }: { id: string; onBack: () => void }) {
   const [stepMenuOpen, setStepMenuOpen] = useState<string | null>(null)   // step id
   const [addStepOpen, setAddStepOpen] = useState(false)
   const [paymentDrawerOpen, setPaymentDrawerOpen] = useState(false)
+  const [previewOpen, setPreviewOpen] = useState(false)
 
   const moveStep = async (stepId: string, dir: -1 | 1) => {
     if (!funnel) return
@@ -504,6 +507,11 @@ function FunnelDetailView({ id, onBack }: { id: string; onBack: () => void }) {
           </div>
         </div>
         <div className="flex gap-2">
+          <button onClick={() => setPreviewOpen(true)} disabled={!funnel.steps.some(s => s.html)}
+            className="inline-flex items-center gap-1 text-sm px-3 py-1.5 border border-neutral-700 rounded-lg hover:bg-neutral-800 disabled:opacity-40"
+            title="Preview flow end-to-end (không cần publish)">
+            <Eye className="w-3.5 h-3.5" /> Preview flow
+          </button>
           <button onClick={() => setPaymentDrawerOpen(true)}
             className="inline-flex items-center gap-1 text-sm px-3 py-1.5 border border-neutral-700 rounded-lg hover:bg-neutral-800"
             title="Payment settings (VietQR / SePay)">
@@ -608,6 +616,20 @@ function FunnelDetailView({ id, onBack }: { id: string; onBack: () => void }) {
           onSaved={load}
         />
       )}
+
+      {/* Preview flow modal */}
+      {previewOpen && (
+        <PreviewFlowModal
+          funnelId={funnel.id}
+          funnelSlug={funnel.slug}
+          funnelName={funnel.name}
+          steps={funnel.steps.map(s => ({
+            id: s.id, slug: s.slug, name: s.name,
+            step_number: s.step_number, has_html: !!s.html,
+          }))}
+          onClose={() => setPreviewOpen(false)}
+        />
+      )}
     </div>
   )
 }
@@ -687,6 +709,10 @@ function StepEditor({ step, funnel, onSaved }: { step: StepDetail; funnel: Funne
   const [formulaKey, setFormulaKey] = useState(step.copy_formula_key || 'pas')
   const [rawInput, setRawInput] = useState(step.copy_raw_input || '')
   const [copyDraft, setCopyDraft] = useState<CopyDraft>(step.copy_draft || { blocks: [] })
+  const [hasForm, setHasForm] = useState<boolean>(!!step.has_form)
+  const [formFields, setFormFields] = useState<FormField[]>((step.form_fields as any) || [])
+  const [formSuccessSlug, setFormSuccessSlug] = useState<string>(step.form_success_step_slug || '')
+  const [savingForm, setSavingForm] = useState(false)
   const [importHtml, setImportHtml] = useState('')
   const [importConfig, setImportConfig] = useState({ strip_external_scripts: true, override_form_action: true, auto_tag_ctas: true })
   const [busy, setBusy] = useState<false | 'draft' | 'approve' | 'import' | 'save'>(false)
@@ -702,10 +728,31 @@ function StepEditor({ step, funnel, onSaved }: { step: StepDetail; funnel: Funne
     setFormulaKey(step.copy_formula_key || 'pas')
     setRawInput(step.copy_raw_input || '')
     setCopyDraft(step.copy_draft || { blocks: [] })
+    setHasForm(!!step.has_form)
+    setFormFields((step.form_fields as any) || [])
+    setFormSuccessSlug(step.form_success_step_slug || '')
     setError(null)
-    // Default tab: outline if step has draft, else setting
     setTab((step.copy_draft as any)?.blocks?.length ? 'outline' : 'setting')
   }, [step.id])
+
+  const saveFormConfig = async () => {
+    setError(null); setSavingForm(true)
+    try {
+      await api('/api/funnel-steps', {
+        method: 'POST',
+        body: JSON.stringify({
+          id: step.id, funnel_id: step.funnel_id,
+          name: step.name, slug: step.slug, page_type: step.page_type,
+          has_form: hasForm,
+          form_mode: hasForm ? (step.form_mode || 'inline') : 'none',
+          form_fields: formFields,
+          form_success_step_slug: formSuccessSlug || null,
+        }),
+      })
+      onSaved()
+    } catch (e: any) { setError(e.message) }
+    finally { setSavingForm(false) }
+  }
 
   const draftAI = async () => {
     setError(null); setBusy('draft')
@@ -877,6 +924,40 @@ function StepEditor({ step, funnel, onSaved }: { step: StepDetail; funnel: Funne
                 {mode === 'ai_direct' ? 'AI Direct (1-step) coming soon. Hiện dùng AI Draft (2-step) — chất lượng tốt hơn.' : 'Blank mode: viết HTML tay coming soon.'}
               </div>
             )}
+
+            {/* Form config (always visible in Setting tab) */}
+            <div className="border-t border-neutral-800 pt-4">
+              <label className="flex items-center justify-between mb-2">
+                <span className="text-xs text-neutral-500 uppercase tracking-wider">Form config</span>
+                <label className="flex items-center gap-2 text-sm">
+                  <input type="checkbox" checked={hasForm} onChange={e => setHasForm(e.target.checked)} />
+                  Step này có form thu info
+                </label>
+              </label>
+              {hasForm && (
+                <>
+                  <FormFieldsEditor value={formFields} onChange={setFormFields} />
+                  <div className="mt-3">
+                    <label className="text-xs text-neutral-500 uppercase tracking-wider block mb-1">Sau khi submit → step tiếp theo</label>
+                    <select value={formSuccessSlug} onChange={e => setFormSuccessSlug(e.target.value)}
+                      className="w-full px-3 py-2 bg-neutral-900 border border-neutral-800 rounded-lg text-sm">
+                      <option value="">(default: step kế tiếp theo thứ tự)</option>
+                      {funnel.steps.filter(s => s.id !== step.id).map(s => (
+                        <option key={s.id} value={s.slug}>Step {s.step_number}: {s.name} (/{s.slug})</option>
+                      ))}
+                    </select>
+                  </div>
+                </>
+              )}
+              <button onClick={saveFormConfig} disabled={savingForm}
+                className="mt-3 w-full inline-flex items-center justify-center gap-2 px-3 py-2 border border-neutral-700 rounded-lg hover:bg-neutral-800 text-sm disabled:opacity-40">
+                {savingForm ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                Save form config
+              </button>
+              <p className="text-[10px] text-neutral-500 mt-1">
+                💡 Form config được inject vào HTML khi Approve. Nếu đã có HTML rồi, cần Regenerate → Approve lại để áp thay đổi.
+              </p>
+            </div>
           </div>
         )}
 

@@ -31,6 +31,63 @@ Portal đầy đủ tính năng, không phải starter kit trống.
 - **Students view** — danh sách học viên với thông tin đầy đủ
 - **Assign leads** — phân công sales người phụ trách
 
+## 🎯 AI Funnel Builder (mới)
+
+### Multi-step funnels
+- **Sales Funnel** (built-in): Landing → Order → Upsell → Thank-you (4 steps auto-suggested)
+- **Leads Funnel** (built-in): Landing + form → Thank-you (2 steps)
+- **Custom types**: tự tạo funnel type mới trong Settings → Funnel Types (VD Coaching Call, Product Launch, Webinar)
+
+### Content-first workflow (2-step)
+1. **Setting step tab**: pick formula (PAS/AIDA/BAB/4Ps/QUEST/Star-Story) + raw input
+2. AI drafts **structured JSON blocks** (Hero, Pain, Solution, Testimonial, Pricing, FAQ, CTA...)
+3. **Copy outline tab**: edit block tree inline, regenerate individual sections
+4. Approve → **per-block HTML render** (parallel 3 blocks, avoids max_output_tokens)
+5. Publish → live at `/f/<slug>`
+
+### 20 known block types
+Hero (3 variants), Pain (list/story), Solution reveal, Feature-benefit, Mechanism, Testimonials (grid/single), Stats, Logos, Case study, Pricing (table/single), Bonus stack, Guarantee, Countdown, Scarcity, FAQ, Comparison, Timeline, CTA (simple/form/repeat), Custom (AI freeform escape hatch)
+
+### Content sources
+- **AI Draft** (recommended): 2-step draft → approve → HTML
+- **AI Direct**: 1-step input → HTML (coming soon)
+- **Import HTML**: paste HTML từ Landingi/Framer/anywhere → analyzer strips scripts + overrides form action + tags CTAs
+- **Blank**: viết HTML tay (coming soon)
+
+### Style picker
+- **6 vibes**: Cyberpunk / Minimal / Warm / Corporate / Startup / Editorial
+- **5 font pairs**: Inter+Playfair / Manrope+Fraunces / IBM Plex / Space Grotesk+Instrument / System
+- Layout density (Airy/Balanced/Dense) + brand color hex
+
+### Preview flow simulator
+- Preview button trong FunnelDetail → modal iframe stack
+- Click through steps + intercept form submits (không lưu thật)
+- Test end-to-end trước khi publish
+
+### Funnel Types & Copy Formulas — editable
+- Settings → Funnel Types: 30k-char skill prompt per type (editable)
+- Settings → Copy Formulas: 6 built-in copy formulas, add custom
+
+### Form handling + CRM sync
+- Form fields editor per step (name/label/type/required)
+- Submit → auto-create lead trong CRM leads table
+- Merge tags (`tags_to_apply` + `additional_tags`) vào lead
+- UTM tracking từ referrer
+
+### SePay VietQR payment
+- Payment config drawer: bank + account + webhook secret (encrypted AES-GCM)
+- QR generation via `qr.sepay.vn/img` với reference code auto-generated
+- Payment page với countdown expiry + polling (3s)
+- SePay webhook `/api/f/sepay-webhook` → verify Apikey → match reference → mark paid → convert lead → customer → create payments row
+- Auto-redirect thank-you khi detect paid
+
+### UX polish
+- Auto-suggest steps từ type khi tạo funnel (transparent)
+- Reorder steps ↑↓, add step (6 templates), rename, delete
+- Version history (5 versions/step, auto-prune trigger)
+- Regenerate all button trong Copy outline
+- Formula + model badges
+
 ## 💰 Payment & Affiliate
 
 - **SePay webhook** — nhận notify VietQR tự động → provision customer + enroll khóa học

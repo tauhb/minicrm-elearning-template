@@ -113,6 +113,42 @@ Khi user nói "thêm khóa học X" hoặc `/portal add-course`:
 4. Verify: fetch course_id vừa tạo, count zones/quests đúng chưa
 5. Nếu user muốn: tạo enrollment cho student sẵn có
 
+## AI Funnel Builder
+
+Portal có tính năng **Multi-step Funnel Builder** với content-first workflow:
+
+**Data model** (Migration 006-009):
+- `funnel_types` — templates (Sales/Leads built-in + user-defined), edit ở Settings → Funnel Types
+- `funnel_flows` — 1 flow = 1 landing pipeline với N steps, có style_preset + shared_context + tags_to_apply + payment_config
+- `funnel_steps` — pages (landing/opt-in/order/upsell/thank-you/custom), có form config + copy_draft (JSON blocks)
+- `funnel_form_submissions` — leads captured (auto-sync sang CRM leads table + merge tags)
+- `funnel_step_events` — visit/cta_click/form_submit tracking
+- `funnel_step_copy_versions` — undo history (5 versions/step, auto-prune)
+- `funnel_orders` — SePay pending/paid orders
+- `copy_formulas` — 6 built-in (PAS/AIDA/BAB/4Ps/QUEST/Star-Story), editable
+
+**Content-first workflow (2-step)**:
+1. User setup funnel: type + style + shared_context (product/audience/USP)
+2. Auto-suggest steps từ type → user thấy timeline 2-4 steps ready
+3. Click step → Setting tab: chọn formula (PAS/AIDA/...) + raw input → **Draft nội dung với AI** (~15s)
+4. Nhảy sang Copy outline tab: edit block tree, regenerate all
+5. Bấm **Duyệt content → tạo HTML** → per-block render (parallel 3 blocks) → HTML preview
+6. Publish → live tại `/f/<slug>` (auto redirect step-1 nếu không có step slug)
+
+**Style Picker**: 6 vibes (cyberpunk/minimal/warm/corporate/startup/editorial) × 5 font pairs × layout/density/brand color.
+
+**Import HTML mode**: paste HTML từ Landingi/Framer → analyzer strips scripts + overrides form action + tags CTAs.
+
+**SePay VietQR flow** (payment_mode='inline_qr' + payment_config có bank/account/webhook_secret):
+- Order form submit → tạo order → redirect `/f/<slug>/pay/<order_id>` (QR page với polling 3s)
+- Customer scan QR → SePay webhook `/api/f/sepay-webhook` verify Authorization Apikey secret
+- Webhook match reference → mark paid → auto-convert lead → customer + create payments row
+- Frontend polling detect paid → redirect thank-you
+
+**Preview mode**: Admin có "Preview flow" button → modal iframe stack, form submit intercepted (không lưu thật, chỉ nhảy step).
+
+**Tags system**: `funnel_flows.tags_to_apply` + `funnel_steps.additional_tags` → merge vào leads.tags on submit. Sau này Workflow feature dùng để trigger email/actions.
+
 ## AI Providers (ChatGPT via OAuth)
 
 Portal hỗ trợ kết nối ChatGPT Plus subscription qua **OAuth device flow** (giống Hermes Agent):
