@@ -7,6 +7,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { createClient } from '@supabase/supabase-js'
 import crypto from 'crypto'
+import { buildQrUrl, generateReferenceCode, resolveAmount, PaymentConfig } from '../../services/sepay'
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -49,14 +50,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   // Verify funnel is published
   const { data: flow } = await admin.from('funnel_flows')
-    .select('id, slug, status, tags_to_apply').eq('id', funnel_id).maybeSingle()
+    .select('id, slug, status, tags_to_apply, payment_mode, payment_config').eq('id', funnel_id).maybeSingle()
   if (!flow || flow.status !== 'published') {
     return res.status(404).json({ error: 'Funnel not published' })
   }
 
   // Verify step + get success redirect
   const { data: step } = await admin.from('funnel_steps')
-    .select('id, form_success_step_slug, form_success_url, form_fields, additional_tags').eq('id', step_id).maybeSingle()
+    .select('id, page_type, form_success_step_slug, form_success_url, form_fields, additional_tags').eq('id', step_id).maybeSingle()
   if (!step) return res.status(404).json({ error: 'Step not found' })
 
   // Extract field values (skip system fields)
@@ -150,9 +151,55 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }).eq('id', step_id)
   }
 
+  // ── SePay: if this is an order step and funnel has inline_qr payment configured
+  //   → create funnel_orders row + redirect to payment page (shows QR + polls)
+  let paymentOrderId: string | null = null
+  const isPaymentStep = (step.page_type === 'order' || step.page_type === 'opt-in')
+                        && flow.payment_mode === 'inline_qr'
+                        && flow.payment_config?.account_number
+  if (isPaymentStep) {
+    try {
+      const cfg = flow.payment_config as PaymentConfig
+      const amount = resolveAmount(cfg, fieldData)
+      if (amount > 0) {
+        const referenceCode = generateReferenceCode(cfg.order_prefix)
+        const qrUrl = buildQrUrl(cfg, amount, referenceCode)
+        const expiresAt = new Date(Date.now() + 30 * 60 * 1000)   // 30 min
+        const { data: order, error: orderErr } = await admin.from('funnel_orders').insert({
+          funnel_id, step_id, submission_id: submission.id,
+          reference_code: referenceCode, amount, currency: 'VND',
+          status: 'pending',
+          bank_snapshot: {
+            bank_name: cfg.bank_name, bank_bin: cfg.bank_bin,
+            account_number: cfg.account_number, account_holder: cfg.account_holder,
+          },
+          customer_snapshot: {
+            name: fieldData.name, email: fieldData.email, phone: fieldData.phone,
+          },
+          qr_url: qrUrl,
+          expires_at: expiresAt.toISOString(),
+        }).select('id').single()
+        if (!orderErr && order) {
+          paymentOrderId = order.id
+          // Link submission → order
+          await admin.from('funnel_form_submissions').update({ order_id: order.id }).eq('id', submission.id)
+        } else {
+          console.error('[funnel-submit] order create failed:', orderErr?.message)
+        }
+      } else {
+        console.warn('[funnel-submit] payment step but amount=0 — skipping order creation')
+      }
+    } catch (e: any) {
+      console.error('[funnel-submit] SePay flow error:', e.message)
+      // Fall through to normal redirect
+    }
+  }
+
   // Decide redirect
   let redirectUrl = '/'
-  if (step.form_success_url) {
+  if (paymentOrderId) {
+    redirectUrl = `/f/${flow.slug}/pay/${paymentOrderId}`
+  } else if (step.form_success_url) {
     redirectUrl = step.form_success_url
   } else if (step.form_success_step_slug) {
     redirectUrl = `/f/${flow.slug}/${step.form_success_step_slug}`

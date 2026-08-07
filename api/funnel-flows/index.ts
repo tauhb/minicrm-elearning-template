@@ -8,6 +8,7 @@
 
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { createClient } from '@supabase/supabase-js'
+import { encrypt, tryDecrypt } from '../../services/crypto'
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -102,6 +103,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         custom_domain: body.custom_domain || null,
         created_by: user.id,
         updated_at: new Date().toISOString(),
+      }
+
+      // Handle payment_config — encrypt webhook_secret if provided (as plaintext)
+      if (body.payment_config !== undefined) {
+        const pc = { ...body.payment_config }
+        if (typeof pc.webhook_secret === 'string' && pc.webhook_secret.trim()) {
+          try {
+            pc.webhook_secret_encrypted = encrypt(pc.webhook_secret.trim())
+          } catch (e: any) {
+            return res.status(500).json({ error: `Encryption failed: ${e.message}. Set PROVIDER_ENCRYPTION_KEY.` })
+          }
+        }
+        delete pc.webhook_secret   // Never store plaintext
+        payload.payment_config = pc
       }
 
       if (body.id) {

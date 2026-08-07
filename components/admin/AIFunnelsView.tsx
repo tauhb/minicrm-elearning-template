@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useCallback } from 'react'
-import { Sparkles, Plus, Loader2, Eye, Edit2, Trash2, ExternalLink, Send, ChevronLeft, Layers, Wand2, FileCode2, X, Check, ArrowRight, Copy, Save, Zap, ArrowUp, ArrowDown, Settings2, Tag } from 'lucide-react'
+import { Sparkles, Plus, Loader2, Eye, Edit2, Trash2, ExternalLink, Send, ChevronLeft, Layers, Wand2, FileCode2, X, Check, ArrowRight, Copy, Save, Zap, ArrowUp, ArrowDown, Settings2, Tag, CreditCard } from 'lucide-react'
 import { supabase } from '../../services/supabase'
 import { StylePicker, StylePreset } from './funnels/StylePicker'
 import { ContentDraftEditor, CopyDraft } from './funnels/ContentDraftEditor'
+import { PaymentConfigDrawer } from './funnels/PaymentConfigDrawer'
 
 type Status = 'draft' | 'published' | 'archived'
 
@@ -14,6 +15,7 @@ interface FunnelDetail extends FunnelListItem {
   shared_context: Record<string, any>
   custom_prompt: string | null
   payment_mode: string
+  payment_config: any
   tags_to_apply: string[]
   custom_domain: string | null
   steps: StepDetail[]
@@ -409,6 +411,7 @@ function FunnelDetailView({ id, onBack }: { id: string; onBack: () => void }) {
 
   const [stepMenuOpen, setStepMenuOpen] = useState<string | null>(null)   // step id
   const [addStepOpen, setAddStepOpen] = useState(false)
+  const [paymentDrawerOpen, setPaymentDrawerOpen] = useState(false)
 
   const moveStep = async (stepId: string, dir: -1 | 1) => {
     if (!funnel) return
@@ -501,6 +504,15 @@ function FunnelDetailView({ id, onBack }: { id: string; onBack: () => void }) {
           </div>
         </div>
         <div className="flex gap-2">
+          <button onClick={() => setPaymentDrawerOpen(true)}
+            className="inline-flex items-center gap-1 text-sm px-3 py-1.5 border border-neutral-700 rounded-lg hover:bg-neutral-800"
+            title="Payment settings (VietQR / SePay)">
+            <CreditCard className="w-3.5 h-3.5" />
+            {funnel.payment_mode === 'inline_qr' ? 'SePay' : 'Payment'}
+            {funnel.payment_mode === 'inline_qr' && funnel.payment_config?.account_number && (
+              <Check className="w-3 h-3 text-green-400" />
+            )}
+          </button>
           {funnel.status === 'published' && (
             <a href={`/f/${funnel.slug}`} target="_blank" rel="noopener noreferrer"
               className="inline-flex items-center gap-1 text-sm px-3 py-1.5 border border-neutral-700 rounded-lg hover:bg-neutral-800">
@@ -583,6 +595,18 @@ function FunnelDetailView({ id, onBack }: { id: string; onBack: () => void }) {
           {/* Step editor */}
           {selectedStep && <StepEditor step={selectedStep} funnel={funnel} onSaved={load} />}
         </>
+      )}
+
+      {/* Payment config drawer (rendered outside conditional so opens with 0 steps too) */}
+      {paymentDrawerOpen && (
+        <PaymentConfigDrawer
+          funnelId={funnel.id}
+          funnelSlug={funnel.slug}
+          initialConfig={funnel.payment_config || {}}
+          paymentMode={funnel.payment_mode}
+          onClose={() => setPaymentDrawerOpen(false)}
+          onSaved={load}
+        />
       )}
     </div>
   )
