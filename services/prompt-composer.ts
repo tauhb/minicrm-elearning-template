@@ -22,23 +22,41 @@ const HTML_RUNTIME_RULES = `
 - Output PHẢI là HTML hoàn chỉnh: <!DOCTYPE html> + <head> + <body>
 - Tailwind CSS qua CDN: <script src="https://cdn.tailwindcss.com"></script>
 - Font: Google Fonts (theo style instructions)
-- CTA buttons PHẢI có \`data-cta="1"\`
-- Form PHẢI có \`action="/api/f/submit" method="POST" data-form="1"\` + hidden inputs \`funnel_id\`, \`step_id\` (portal sẽ populate values)
 - Responsive mobile-first
 - KHÔNG markdown wrapper, chỉ HTML thuần
 - Copy tiếng Việt, dùng "bạn"
+
+## Quy ước link/CTA (BẮT BUỘC)
+- **Scroll trong page** (VD "Xem chi tiết", "Xem pricing"): dùng \`<a href="#section-id">\` — **KHÔNG** có \`data-cta\`. Section đích phải có \`id="section-id"\`.
+- **Primary CTA** (advance funnel — "Đăng ký ngay", "Mua ngay"): dùng \`<a data-cta="1">\` hoặc \`<button data-cta="1">\` — **KHÔNG** cần href, portal tự inject.
+- **External link** (Zalo, YouTube): \`<a href="https://..." target="_blank">\` — không data-cta.
+
+## Quy ước Form (BẮT BUỘC)
+- Form phải có \`data-form="1"\` — portal tự inject action, method, hidden funnel_id/step_id.
+- Input name attribute phải khớp form_fields config.
 `
 
 const BLOCK_RUNTIME_RULES = `
 # RUNTIME OUTPUT RULES (BẮT BUỘC — render 1 BLOCK duy nhất)
 - Output PHẢI là 1 <section> element duy nhất (hoặc <div>) — KHÔNG có <!DOCTYPE>, <html>, <head>, <body>
 - Section dùng Tailwind classes (Tailwind CDN sẽ load ở shell)
-- Nếu block có CTA: button có \`data-cta="1"\`
-- Nếu block có form: form với \`action="/api/f/submit" method="POST" data-form="1"\`
 - Responsive: mobile-first classes (md:, lg:)
 - Copy tiếng Việt, "bạn" (không "anh/chị")
 - KHÔNG markdown wrapper, chỉ HTML section
 - Section padding: py-16 md:py-24. Container: max-w-6xl mx-auto px-6
+
+## Quy ước link/CTA (BẮT BUỘC)
+- **Scroll link** ("Xem chi tiết", "Xem giá"): \`<a href="#section-id">\` — KHÔNG có \`data-cta\`. Đảm bảo section đích có \`id="section-id"\`.
+- **Primary CTA** ("Đăng ký ngay", "Mua ngay"): \`<a data-cta="1">\` hoặc \`<button data-cta="1">\` — KHÔNG cần href.
+- **Upsell page — CHỈ khi step_type="upsell"**:
+  - Nút CÓ (nhận offer): \`<button data-cta="upsell-yes">CÓ, tôi lấy thêm</button>\`
+  - Nút KHÔNG (bỏ qua): \`<a data-cta="upsell-no">Cảm ơn, tôi chỉ cần đơn này</a>\`
+  - Cả 2 nút phải nằm cạnh nhau, style rõ ràng: YES = brand color, NO = subtle/outline text
+- **External**: \`<a href="https://..." target="_blank">\`
+
+## Form (BẮT BUỘC)
+- \`<form data-form="1">\` — portal tự inject action/method/hidden funnel_id/step_id.
+- Input name đúng theo form_fields config.
 `
 
 const BLOCK_TO_HTML_GUIDE = `
@@ -49,8 +67,13 @@ Render mỗi block theo semantic + Tailwind. Ví dụ:
 - \`pain-list\`: <section><h2>{title}</h2><ul class="grid md:grid-cols-2 gap-4">{bullets as cards}</ul></section>
 - \`testimonials-grid\`: <section><h2>{title}</h2><div class="grid md:grid-cols-3 gap-6">{items as quote cards}</div></section>
 - \`pricing-table\`: <section><h2>{title}</h2><div class="grid md:grid-cols-3 gap-4">{tiers, highlight ring nếu highlighted}</div></section>
-- \`cta-simple\`, \`cta-repeat\`: centered, large button với data-cta="1"
-- \`cta-with-form\`: form inline, action="/api/f/submit", các fields là type=text/email/tel
+- \`cta-simple\`, \`cta-repeat\`: centered, large button có \`data-cta="1"\` — KHÔNG cần href (portal inject).
+- \`cta-with-form\`: \`<form data-form="1">\` — portal inject action/method/hidden.
+
+**UPSELL steps (page_type="upsell")**: Cuối trang PHẢI có 1 section với 2 nút song song:
+  - \`<button data-cta="upsell-yes" class="...brand...">CÓ, tôi lấy thêm ưu đãi này</button>\`
+  - \`<a data-cta="upsell-no" class="text-neutral-500 underline">Cảm ơn, tôi chỉ cần đơn hàng này</a>\`
+  YES nổi bật (bg brand, font-bold, py-4); NO subtle (link text màu xám).
 
 Với \`kind: "custom"\`: dùng content.html nếu có, else convert content.markdown → HTML.
 
@@ -275,8 +298,10 @@ ${fontLinks}
   :root { --brand: ${brand}; }
   body { font-family: ${bodyFont}; }
   h1, h2, h3, h4 { font-family: ${headingFont}; }
-  [data-cta="1"] { background: var(--brand); transition: opacity .2s; }
-  [data-cta="1"]:hover { opacity: 0.9; }
+  [data-cta="1"], [data-cta="next"], [data-cta="upsell-yes"] { background: var(--brand); color: #0a0a0a; transition: opacity .2s; cursor: pointer; }
+  [data-cta="1"]:hover, [data-cta="next"]:hover, [data-cta="upsell-yes"]:hover { opacity: 0.9; }
+  [data-cta="upsell-no"] { color: #6b7280; text-decoration: underline; cursor: pointer; }
+  [data-cta="upsell-no"]:hover { color: #374151; }
 </style>
 </head>
 <body class="bg-white text-neutral-900">

@@ -9,7 +9,7 @@ function payPageHtml(order: any, portalBase: string): string {
   const bank = order.bank_snapshot || {}
   const cust = order.customer_snapshot || {}
   const amountFmt = new Intl.NumberFormat('vi-VN').format(order.amount || 0)
-  const successUrl = `/f/${order.funnel_slug}${order.next_step_slug ? `/${order.next_step_slug}` : ''}`
+  const successUrl = `/f/${order.funnel_slug}${order.next_step_slug ? `/${order.next_step_slug}` : ''}${order.next_step_qs || ''}`
   return `<!DOCTYPE html>
 <html lang="vi">
 <head>
@@ -170,10 +170,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const { data: step } = await admin.from('funnel_steps')
     .select('form_success_step_slug, form_success_url').eq('id', order.step_id).maybeSingle()
 
+  // If the next step is an upsell page, it needs ?order_id=<parent_order> to verify eligibility.
+  // Look up next step by slug to check its page_type.
+  let nextIsUpsell = false
+  if (step?.form_success_step_slug) {
+    const { data: nextStep } = await admin.from('funnel_steps')
+      .select('page_type').eq('funnel_id', order.funnel_id).eq('slug', step.form_success_step_slug).maybeSingle()
+    nextIsUpsell = nextStep?.page_type === 'upsell'
+  }
+
   const enriched = {
     ...order,
     funnel_slug: (order.funnel_flows as any)?.slug,
     next_step_slug: step?.form_success_step_slug,
+    next_step_qs: nextIsUpsell ? `?order_id=${order.id}` : '',
   }
 
   const portalBase = process.env.CUSTOMER_PORTAL_URL || `${url.protocol}//${req.headers.host}`

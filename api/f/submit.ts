@@ -55,9 +55,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(404).json({ error: 'Funnel not published' })
   }
 
-  // Verify step + get success redirect
+  // Verify step + get success redirect + product/pricing
   const { data: step } = await admin.from('funnel_steps')
-    .select('id, page_type, form_success_step_slug, form_success_url, form_fields, additional_tags').eq('id', step_id).maybeSingle()
+    .select('id, page_type, form_success_step_slug, form_success_url, form_fields, additional_tags, assigned_product_id, price_override').eq('id', step_id).maybeSingle()
   if (!step) return res.status(404).json({ error: 'Step not found' })
 
   // Extract field values (skip system fields)
@@ -157,22 +157,34 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }).eq('id', step_id)
   }
 
+  // ── Resolve amount for this step
+  //    Priority: step.price_override → step.assigned_product.price → flow.payment_config
+  let stepAmount = 0
+  let stepProductId: string | null = null
+  {
+    const pc: any = flow.payment_config || {}
+    if (step.price_override != null) {
+      stepAmount = Number(step.price_override) || 0
+    } else if ((step as any).assigned_product_id) {
+      stepProductId = (step as any).assigned_product_id
+      const { data: prod } = await admin.from('products').select('id, price').eq('id', stepProductId).maybeSingle()
+      stepAmount = Number(prod?.price) || 0
+    } else if (pc.amount_mode === 'from_form' && pc.amount_form_field) {
+      const raw = fieldData[pc.amount_form_field]
+      stepAmount = typeof raw === 'string' ? parseInt(raw.replace(/[^\d]/g, ''), 10) : Number(raw) || 0
+    } else if (pc.fixed_amount) {
+      stepAmount = Number(pc.fixed_amount) || 0
+    }
+    if (isNaN(stepAmount) || stepAmount < 0) stepAmount = 0
+  }
+
   // ── Create pending payment row in payments table for Sales funnel order steps
   //    (works for collect_only mode; SePay flow will UPDATE this row on webhook)
   let pendingPaymentId: string | null = null
   const isSalesOrder = step.page_type === 'order' && flow.type_key === 'sales'
   if (isSalesOrder) {
     try {
-      // Resolve amount from fixed config OR form field
-      let amt = 0
-      const pc: any = flow.payment_config || {}
-      if (pc.amount_mode === 'from_form' && pc.amount_form_field) {
-        const raw = fieldData[pc.amount_form_field]
-        amt = typeof raw === 'string' ? parseInt(raw.replace(/[^\d]/g, ''), 10) : Number(raw)
-      } else if (pc.fixed_amount) {
-        amt = Number(pc.fixed_amount)
-      }
-      if (isNaN(amt) || amt < 0) amt = 0
+      const amt = stepAmount
 
       // Look up lead by email (will be created below if not exists)
       let leadForPayment: string | null = null
@@ -206,7 +218,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (isPaymentStep) {
     try {
       const cfg = flow.payment_config as PaymentConfig
-      const amount = resolveAmount(cfg, fieldData)
+      // Prefer per-step amount (product/override) — fall back to funnel-level config
+      const amount = stepAmount > 0 ? stepAmount : resolveAmount(cfg, fieldData)
       if (amount > 0) {
         const referenceCode = generateReferenceCode(cfg.order_prefix)
         const qrUrl = buildQrUrl(cfg, amount, referenceCode)

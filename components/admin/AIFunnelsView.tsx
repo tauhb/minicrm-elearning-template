@@ -24,8 +24,12 @@ interface FunnelDetail extends FunnelListItem {
   chat_widget_inbox_id?: string | null
   steps: StepDetail[]
 }
+interface Product { id: string; name: string; type?: string; price?: number }
 interface StepDetail {
   id: string; funnel_id: string; step_number: number; slug: string; name: string; page_type: string
+  assigned_product_id?: string | null
+  price_override?: number | null
+  upsell_config?: { description?: string; accept_label?: string; skip_label?: string; success_step_slug?: string | null } | null
   content_source: 'ai_draft' | 'ai_direct' | 'imported' | 'blank'
   has_form: boolean; form_mode: string; form_fields: any[]; form_success_step_slug?: string
   copy_input: any; copy_formula_key?: string; copy_raw_input?: string
@@ -783,12 +787,24 @@ function StepEditor({ step, funnel, onSaved }: { step: StepDetail; funnel: Funne
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null)
   const [importHtml, setImportHtml] = useState('')
   const [importConfig, setImportConfig] = useState({ strip_external_scripts: true, override_form_action: true, auto_tag_ctas: true })
-  const [busy, setBusy] = useState<false | 'draft' | 'approve' | 'import' | 'save'>(false)
+  const [busy, setBusy] = useState<false | 'draft' | 'approve' | 'import' | 'save' | 'product'>(false)
   const [error, setError] = useState<string | null>(null)
   const [previewMode, setPreviewMode] = useState<'preview' | 'code'>('preview')
 
+  // Product & pricing (for order/upsell steps)
+  const [products, setProducts] = useState<Product[]>([])
+  const [assignedProductId, setAssignedProductId] = useState<string>(step.assigned_product_id || '')
+  const [priceOverride, setPriceOverride] = useState<string>(step.price_override != null ? String(step.price_override) : '')
+  const [upsellDescription, setUpsellDescription] = useState<string>(step.upsell_config?.description || '')
+  const [upsellSuccessSlug, setUpsellSuccessSlug] = useState<string>(step.upsell_config?.success_step_slug || '')
+
   useEffect(() => {
     api<{ formulas: Formula[] }>('/api/copy-formulas').then(r => setFormulas(r.formulas))
+    // Load products via supabase (client-side) — same pattern as other admin views
+    import('../../services/supabase').then(({ supabase }) => {
+      supabase.from('products').select('id, name, type, price').eq('status', 'active').order('created_at', { ascending: false })
+        .then(({ data }) => setProducts((data as any) || []))
+    })
   }, [])
 
   useEffect(() => {
@@ -803,6 +819,10 @@ function StepEditor({ step, funnel, onSaved }: { step: StepDetail; funnel: Funne
     setRenderInstructions(step.render_instructions || '')
     setPageTitle(step.page_title || '')
     setPageDescription(step.page_description || '')
+    setAssignedProductId(step.assigned_product_id || '')
+    setPriceOverride(step.price_override != null ? String(step.price_override) : '')
+    setUpsellDescription(step.upsell_config?.description || '')
+    setUpsellSuccessSlug(step.upsell_config?.success_step_slug || '')
     setDirtyIndices([])
     setDirty(false)
     setLastSavedAt(null)
@@ -924,6 +944,27 @@ function StepEditor({ step, funnel, onSaved }: { step: StepDetail; funnel: Funne
       onSaved()
     } catch (e: any) { setError(e.message) }
     finally { setSavingForm(false) }
+  }
+
+  const saveProductConfig = async () => {
+    setError(null); setBusy('product')
+    try {
+      const payload: any = {
+        id: step.id, funnel_id: step.funnel_id,
+        name: step.name, slug: step.slug, page_type: step.page_type,
+        assigned_product_id: assignedProductId || null,
+        price_override: priceOverride === '' ? null : Number(priceOverride.replace(/[^\d]/g, '')),
+      }
+      if (step.page_type === 'upsell') {
+        payload.upsell_config = {
+          description: upsellDescription || '',
+          success_step_slug: upsellSuccessSlug || null,
+        }
+      }
+      await api('/api/funnel-steps', { method: 'POST', body: JSON.stringify(payload) })
+      onSaved()
+    } catch (e: any) { setError(e.message) }
+    finally { setBusy(false) }
   }
 
   const draftAI = async () => {
@@ -1127,6 +1168,81 @@ function StepEditor({ step, funnel, onSaved }: { step: StepDetail; funnel: Funne
                 </button>
               </div>
             </div>
+
+            {/* Product + Pricing (order & upsell steps) */}
+            {(step.page_type === 'order' || step.page_type === 'upsell') && (
+              <div className="border-t border-neutral-800 pt-4">
+                <label className="text-xs text-neutral-500 uppercase tracking-wider block mb-2">
+                  Sản phẩm & giá {step.page_type === 'upsell' ? '(upsell add-on)' : '(order chính)'}
+                </label>
+                <div className="space-y-3">
+                  <div>
+                    <label className="text-[10px] text-neutral-500 block mb-1">Sản phẩm từ kho</label>
+                    <select value={assignedProductId} onChange={e => setAssignedProductId(e.target.value)}
+                      className="w-full px-2 py-1.5 bg-neutral-950 border border-neutral-800 rounded text-xs">
+                      <option value="">— Chưa gán —</option>
+                      {products.map(p => (
+                        <option key={p.id} value={p.id}>
+                          {p.name} {p.price ? `— ${new Intl.NumberFormat('vi-VN').format(p.price)} đ` : ''}
+                        </option>
+                      ))}
+                    </select>
+                    {products.length === 0 && (
+                      <p className="text-[10px] text-amber-500 mt-1">
+                        ⚠ Chưa có sản phẩm nào. Tạo ở tab "Sản phẩm" trước.
+                      </p>
+                    )}
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-neutral-500 block mb-1">
+                      Giá override (VND, để trống = dùng giá gốc sản phẩm)
+                    </label>
+                    <input value={priceOverride} onChange={e => setPriceOverride(e.target.value.replace(/[^\d]/g, ''))}
+                      className="w-full px-2 py-1.5 bg-neutral-950 border border-neutral-800 rounded text-xs"
+                      placeholder={
+                        assignedProductId && products.find(p => p.id === assignedProductId)?.price
+                          ? `Default: ${new Intl.NumberFormat('vi-VN').format(products.find(p => p.id === assignedProductId)!.price!)} đ`
+                          : 'VD: 297000'
+                      } />
+                    {priceOverride && (
+                      <p className="text-[10px] text-neutral-500 mt-0.5">
+                        = {new Intl.NumberFormat('vi-VN').format(Number(priceOverride))} đ
+                      </p>
+                    )}
+                  </div>
+                  {step.page_type === 'upsell' && (
+                    <>
+                      <div>
+                        <label className="text-[10px] text-neutral-500 block mb-1">Mô tả upsell (hiển thị trong modal QR)</label>
+                        <input value={upsellDescription} onChange={e => setUpsellDescription(e.target.value)}
+                          className="w-full px-2 py-1.5 bg-neutral-950 border border-neutral-800 rounded text-xs"
+                          placeholder="VD: Trọn bộ khoá học nâng cao" />
+                      </div>
+                      <div>
+                        <label className="text-[10px] text-neutral-500 block mb-1">
+                          Sau upsell (dù YES/NO/skip) → step
+                        </label>
+                        <select value={upsellSuccessSlug} onChange={e => setUpsellSuccessSlug(e.target.value)}
+                          className="w-full px-2 py-1.5 bg-neutral-950 border border-neutral-800 rounded text-xs">
+                          <option value="">(default: step kế tiếp theo thứ tự)</option>
+                          {funnel.steps.filter(s => s.id !== step.id).map(s => (
+                            <option key={s.id} value={s.slug}>Step {s.step_number}: {s.name} (/{s.slug})</option>
+                          ))}
+                        </select>
+                      </div>
+                    </>
+                  )}
+                  <button onClick={saveProductConfig} disabled={busy === 'product'}
+                    className="w-full inline-flex items-center justify-center gap-2 px-3 py-2 border border-neutral-700 rounded-lg hover:bg-neutral-800 text-sm disabled:opacity-40">
+                    {busy === 'product' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                    Save sản phẩm & giá
+                  </button>
+                  <p className="text-[10px] text-neutral-500">
+                    💡 Giá này dùng cho QR SePay ({step.page_type === 'order' ? 'thanh toán đơn gốc' : 'thanh toán add-on khi user bấm YES'}).
+                  </p>
+                </div>
+              </div>
+            )}
 
             {/* Form config (always visible in Setting tab) */}
             <div className="border-t border-neutral-800 pt-4">

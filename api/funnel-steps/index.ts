@@ -592,6 +592,13 @@ KHÔNG wrap markdown code fence. Chỉ pure JSON. Tiếng Việt, dùng "bạn".
     if (body.copy_draft !== undefined) payload.copy_draft = body.copy_draft
     if (body.page_title !== undefined) payload.page_title = body.page_title || null
     if (body.page_description !== undefined) payload.page_description = body.page_description || null
+    // Product assignment + upsell config (order/upsell steps)
+    if (body.assigned_product_id !== undefined) payload.assigned_product_id = body.assigned_product_id || null
+    if (body.price_override !== undefined) {
+      const n = body.price_override === null || body.price_override === '' ? null : Number(body.price_override)
+      payload.price_override = n !== null && !isNaN(n) && n >= 0 ? Math.floor(n) : null
+    }
+    if (body.upsell_config !== undefined) payload.upsell_config = body.upsell_config || {}
     if (body.id) {
       const { data, error } = await admin.from('funnel_steps').update(payload).eq('id', body.id).select().single()
       if (error) return res.status(500).json({ error: error.message })
