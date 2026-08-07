@@ -58,6 +58,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       lead_id: lead_id_body,
       amount,
       order_note,
+      phone: phone_body,
     } = req.body || {}
 
     const lead_id = convert_lead_id || lead_id_body
@@ -102,13 +103,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // 5. Upsert customer profile
+    // Backfill phone: prefer request body, else from linked lead (only when customer.phone
+    // is currently NULL — never overwrite manually-set values).
+    let phoneToUse: string | null = phone_body || null
+    if (!phoneToUse && lead_id) {
+      const { data: leadRow } = await admin.from('leads').select('phone').eq('id', lead_id).maybeSingle()
+      phoneToUse = leadRow?.phone || null
+    }
     const paymentStatus = (amount && amount > 0) ? 'paid' : 'pending'
+    const existingCustomer = await admin.from('customers').select('phone').eq('id', userId).maybeSingle()
+    const shouldSetPhone = phoneToUse && !existingCustomer.data?.phone
     await admin.from('customers').upsert({
       id: userId,
       email: emailLower,
       display_name: display_name || emailLower.split('@')[0],
       role,
       payment_status: paymentStatus,
+      ...(shouldSetPhone ? { phone: phoneToUse } : {}),
     })
 
     // 6. Enroll vào course nếu có

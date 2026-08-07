@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react'
-import { X, Save, Tag, CreditCard } from 'lucide-react'
+import { X, Save, Tag, CreditCard, Mail, UserX, UserCheck, Phone } from 'lucide-react'
 import { Profile, Payment } from '../../types'
-import { updateProfile, fetchPayments } from '../../services/api'
+import { updateProfile, fetchPayments, resendCustomerMagicLink, setCustomerStatus } from '../../services/api'
 import CareHistoryTab from './CareHistoryTab'
 import EnrollmentsTab from './EnrollmentsTab'
 import TasksTab from './TasksTab'
@@ -19,6 +19,11 @@ const StudentDetailDrawer: React.FC<Props> = ({ student, onClose, onUpdate }) =>
   const [payments, setPayments] = useState<Payment[]>([])
   const [saving, setSaving] = useState(false)
   const [activeTab, setActiveTab] = useState<'info' | 'care' | 'tasks' | 'courses'>('info')
+  // Wave 1 Track C
+  const [phone, setPhone] = useState<string>((student as any).phone || '')
+  const [status, setStatusVal] = useState<'active' | 'deactivated'>(((student as any).status as any) || 'active')
+  const [resending, setResending] = useState(false)
+  const [togglingStatus, setTogglingStatus] = useState(false)
 
   useEffect(() => {
     fetchPayments(student.id).then(setPayments)
@@ -26,9 +31,33 @@ const StudentDetailDrawer: React.FC<Props> = ({ student, onClose, onUpdate }) =>
 
   const handleSave = async () => {
     setSaving(true)
-    await updateProfile(student.id, { notes, tags })
-    onUpdate({ ...student, notes, tags })
+    await updateProfile(student.id, { notes, tags, phone } as any)
+    onUpdate({ ...student, notes, tags, phone } as any)
     setSaving(false)
+  }
+
+  const handleResend = async () => {
+    if (!confirm(`Gửi lại link đăng nhập cho ${student.email}?`)) return
+    setResending(true)
+    const r = await resendCustomerMagicLink(student.id)
+    setResending(false)
+    alert(r.success ? 'Đã gửi link đăng nhập.' : `Lỗi: ${r.error || 'Không gửi được'}`)
+  }
+
+  const handleToggleStatus = async () => {
+    const next = status === 'active' ? 'deactivated' : 'active'
+    if (!confirm(next === 'deactivated'
+      ? `Ngừng hoạt động ${student.display_name}? Tài khoản vẫn còn dữ liệu, chỉ ẩn khỏi danh sách mặc định.`
+      : `Kích hoạt lại ${student.display_name}?`)) return
+    setTogglingStatus(true)
+    const r = await setCustomerStatus(student.id, next)
+    setTogglingStatus(false)
+    if (r.success) {
+      setStatusVal(next)
+      onUpdate({ ...student, ...(next === 'deactivated' ? { status: 'deactivated' } : { status: 'active' }) } as any)
+    } else {
+      alert(`Lỗi: ${r.error || 'Không đổi được trạng thái'}`)
+    }
   }
 
   const addTag = () => {
@@ -61,11 +90,28 @@ const StudentDetailDrawer: React.FC<Props> = ({ student, onClose, onUpdate }) =>
               {student.display_name[0]?.toUpperCase()}
             </div>
             <div>
-              <p className="text-sm font-semibold text-white">{student.display_name}</p>
+              <div className="flex items-center gap-2">
+                <p className="text-sm font-semibold text-white">{student.display_name}</p>
+                {status === 'deactivated' && (
+                  <span className="text-[10px] px-1.5 py-0.5 rounded border border-red-500/40 text-red-400 bg-red-500/10">Ngừng HĐ</span>
+                )}
+              </div>
               <p className="text-xs text-gray-500">{student.email}</p>
             </div>
           </div>
-          <button onClick={onClose} className="text-gray-500 hover:text-white"><X size={18} /></button>
+          <div className="flex items-center gap-1">
+            <button onClick={handleResend} disabled={resending || status === 'deactivated'}
+              title="Gửi lại link đăng nhập"
+              className="p-1.5 rounded text-gray-500 hover:text-white hover:bg-gray-800 disabled:opacity-40">
+              <Mail size={16} />
+            </button>
+            <button onClick={handleToggleStatus} disabled={togglingStatus}
+              title={status === 'active' ? 'Ngừng hoạt động' : 'Kích hoạt lại'}
+              className={`p-1.5 rounded hover:bg-gray-800 disabled:opacity-40 ${status === 'active' ? 'text-gray-500 hover:text-red-400' : 'text-green-400 hover:text-green-300'}`}>
+              {status === 'active' ? <UserX size={16} /> : <UserCheck size={16} />}
+            </button>
+            <button onClick={onClose} className="text-gray-500 hover:text-white p-1.5"><X size={18} /></button>
+          </div>
         </div>
 
         {/* Tab Nav */}
@@ -91,6 +137,19 @@ const StudentDetailDrawer: React.FC<Props> = ({ student, onClose, onUpdate }) =>
           {/* INFO TAB */}
           {activeTab === 'info' && (
             <>
+              {/* Phone (Wave 1 Track C — Save button below writes to DB) */}
+              <div>
+                <label className="text-xs text-gray-500 uppercase tracking-wider block mb-1 flex items-center gap-1.5">
+                  <Phone size={11} /> Số điện thoại
+                </label>
+                <input
+                  type="tel"
+                  value={phone}
+                  onChange={e => setPhone(e.target.value)}
+                  placeholder="0900 000 000"
+                  className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded text-sm text-white"
+                />
+              </div>
               {/* Info — cohort/start_date đã chuyển sang tab "Khóa học" (enrollment-based) */}
               <div className="grid grid-cols-2 gap-3">
                 {[

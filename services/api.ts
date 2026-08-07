@@ -759,3 +759,61 @@ export const saveCourseLayout = async (courseId: string, mode: 'journey' | 'modu
     value: { mode },
   }])
 }
+
+// ─── Wave 1 Track C: customer helpers ─────────────────────────────────────
+
+/** Lead gốc đã convert thành customer này (nếu có) — dùng cho drawer "Xem lead gốc". */
+export const fetchSourceLeadForCustomer = async (customerId: string): Promise<Lead | null> => {
+  const { data } = await supabase
+    .from('leads')
+    .select('*, pipeline_stage:pipeline_stages(*)')
+    .eq('converted_to', customerId)
+    .order('converted_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  return data as Lead | null
+}
+
+/** Combined timeline for customer: payments + care_history — sort DESC by created_at. */
+export type CustomerActivityItem =
+  | { kind: 'payment'; id: string; created_at: string; payment: Payment }
+  | { kind: 'care';    id: string; created_at: string; care: CareHistory }
+
+export const fetchCustomerActivity = async (customerId: string, limit = 100): Promise<CustomerActivityItem[]> => {
+  const [paymentsRes, careRes] = await Promise.all([
+    supabase.from('payments').select('*').eq('student_id', customerId)
+      .order('created_at', { ascending: false }).limit(limit),
+    supabase.from('care_history')
+      .select('*, creator:customers!care_history_created_by_fkey(display_name)')
+      .eq('customer_id', customerId)
+      .order('created_at', { ascending: false }).limit(limit),
+  ])
+  const items: CustomerActivityItem[] = []
+  ;(paymentsRes.data || []).forEach((p: any) => items.push({ kind: 'payment', id: `pay-${p.id}`, created_at: p.created_at, payment: p }))
+  ;(careRes.data || []).forEach((c: any) => items.push({ kind: 'care', id: `care-${c.id}`, created_at: c.created_at, care: c }))
+  items.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+  return items
+}
+
+/** POST /api/customers helper — resend magic link. */
+export const resendCustomerMagicLink = async (customerId: string): Promise<{ success: boolean; error?: string }> => {
+  const { data: { session } } = await supabase.auth.getSession()
+  const res = await fetch(`/api/customers?action=resend-magic-link&id=${customerId}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...(session ? { Authorization: `Bearer ${session.access_token}` } : {}) },
+  })
+  const body = await res.json().catch(() => ({}))
+  return { success: res.ok, error: body?.error }
+}
+
+/** POST /api/customers helper — deactivate/activate. */
+export const setCustomerStatus = async (customerId: string, status: 'active' | 'deactivated'): Promise<{ success: boolean; error?: string }> => {
+  const { data: { session } } = await supabase.auth.getSession()
+  const action = status === 'deactivated' ? 'deactivate' : 'activate'
+  const res = await fetch(`/api/customers?action=${action}&id=${customerId}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...(session ? { Authorization: `Bearer ${session.access_token}` } : {}) },
+  })
+  const body = await res.json().catch(() => ({}))
+  return { success: res.ok, error: body?.error }
+}

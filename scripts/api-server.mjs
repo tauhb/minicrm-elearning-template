@@ -1847,6 +1847,8 @@ const server = http.createServer(async (req, nodeRes) => {
       await handleViaImport(mockReq, res, req.url)
     } else if (req.url?.startsWith('/api/f/order-status')) {
       await handleViaImport(mockReq, res, req.url)
+    } else if (req.url?.startsWith('/api/customers')) {
+      await handleViaImport(mockReq, res, req.url)
     } else if (req.url?.startsWith('/api/tasks')) {
       await handleViaImport(mockReq, res, req.url)
     } else if (req.url?.startsWith('/api/f/upsell')) {
