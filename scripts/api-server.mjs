@@ -995,6 +995,40 @@ async function handleAIModels(req, res) {
   } catch (e) { return res.status(500).json({ error: e.message }) }
 }
 
+async function _readCodexStream(response) {
+  if (!response.body) throw new Error('Codex response has no body')
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder('utf-8')
+  let buf = '', text = '', usage
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buf += decoder.decode(value, { stream: true })
+    let idx
+    while ((idx = buf.indexOf('\n\n')) !== -1) {
+      const rawEvent = buf.slice(0, idx)
+      buf = buf.slice(idx + 2)
+      const dataLines = []
+      for (const line of rawEvent.split('\n')) if (line.startsWith('data: ')) dataLines.push(line.slice(6))
+      if (!dataLines.length) continue
+      const dataStr = dataLines.join('\n')
+      if (dataStr === '[DONE]') continue
+      try {
+        const evt = JSON.parse(dataStr)
+        if (evt.type === 'response.output_text.delta' && typeof evt.delta === 'string') text += evt.delta
+        else if (evt.type === 'response.completed' && evt.response) {
+          if (evt.response.usage) usage = evt.response.usage
+          if (!text && Array.isArray(evt.response.output)) {
+            for (const item of evt.response.output) if (item.type === 'message' && Array.isArray(item.content))
+              for (const c of item.content) if (c.type === 'output_text' && c.text) text += c.text
+          }
+        }
+      } catch {}
+    }
+  }
+  return { text, usage }
+}
+
 async function handleAIGenerate(req, res) {
   const user = await assertAdmin(req, res); if (!user) return
   const { provider = 'openai-codex', model = 'gpt-5.6-sol', systemPrompt, userPrompt, maxTokens = 4096, temperature = 0.7 } = req.body || {}
@@ -1004,31 +1038,21 @@ async function handleAIGenerate(req, res) {
     const body = {
       model,
       input: [{ role: 'user', content: [{ type: 'input_text', text: userPrompt }] }],
-      max_output_tokens: maxTokens,
-      temperature,
-      store: false,
-      stream: false,
+      max_output_tokens: maxTokens, temperature,
+      store: false, stream: true,
     }
     if (systemPrompt) body.instructions = systemPrompt
     const resp = await fetch(`${cred.baseUrl}/responses`, {
       method: 'POST',
-      headers: _codexHeaders(cred.accessToken),
+      headers: { ..._codexHeaders(cred.accessToken), 'Accept': 'text/event-stream' },
       body: JSON.stringify(body),
     })
     if (!resp.ok) {
-      const text = await resp.text().catch(() => '')
-      return res.status(500).json({ error: `Codex HTTP ${resp.status}: ${text.slice(0, 300)}` })
+      const t = await resp.text().catch(() => '')
+      return res.status(500).json({ error: `Codex HTTP ${resp.status}: ${t.slice(0, 300)}` })
     }
-    const data = await resp.json()
-    let text = data.output_text || ''
-    if (!text && Array.isArray(data.output)) {
-      for (const item of data.output) {
-        if (item.type === 'message' && Array.isArray(item.content)) {
-          for (const c of item.content) if (c.type === 'output_text' && c.text) text += c.text
-        }
-      }
-    }
-    return res.json({ text, model, provider, usage: data.usage })
+    const { text, usage } = await _readCodexStream(resp)
+    return res.json({ text, model, provider, usage })
   } catch (e) { return res.status(500).json({ error: e.message }) }
 }
 

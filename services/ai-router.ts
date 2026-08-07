@@ -135,13 +135,71 @@ function codexHeaders(accessToken: string): Record<string, string> {
   return h
 }
 
+/**
+ * Read SSE stream from Codex /responses and accumulate output_text.
+ * Codex Responses API contract: store=false AND stream=true (non-streaming not supported).
+ * Events: response.output_text.delta contains { delta: '...' }
+ *         response.completed contains { response: { usage, ... } }
+ */
+async function readCodexStream(response: Response): Promise<{ text: string; usage?: any }> {
+  if (!response.body) throw new Error('Codex response has no body')
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder('utf-8')
+  let buf = ''
+  let text = ''
+  let usage: any = undefined
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buf += decoder.decode(value, { stream: true })
+    // Split by double-newline (SSE event boundary)
+    let idx: number
+    while ((idx = buf.indexOf('\n\n')) !== -1) {
+      const rawEvent = buf.slice(0, idx)
+      buf = buf.slice(idx + 2)
+      // Each event has "event: X\ndata: {...}" lines
+      const dataLines: string[] = []
+      for (const line of rawEvent.split('\n')) {
+        if (line.startsWith('data: ')) dataLines.push(line.slice(6))
+      }
+      if (!dataLines.length) continue
+      const dataStr = dataLines.join('\n')
+      if (dataStr === '[DONE]') continue
+      try {
+        const evt = JSON.parse(dataStr)
+        const type = evt.type || ''
+        if (type === 'response.output_text.delta' && typeof evt.delta === 'string') {
+          text += evt.delta
+        } else if (type === 'response.completed' && evt.response) {
+          if (evt.response.usage) usage = evt.response.usage
+          // Fallback: if we didn't get deltas, extract from output
+          if (!text && Array.isArray(evt.response.output)) {
+            for (const item of evt.response.output) {
+              if (item.type === 'message' && Array.isArray(item.content)) {
+                for (const c of item.content) {
+                  if (c.type === 'output_text' && c.text) text += c.text
+                }
+              }
+            }
+          }
+        }
+      } catch {
+        // Skip malformed event
+      }
+    }
+  }
+  return { text, usage }
+}
+
 async function callOpenAICodex(input: CompletionInput, cred: LoadedCred): Promise<CompletionResult> {
   const model = input.model || 'gpt-5.6-sol'
 
-  // Codex Responses API format:
+  // Codex Responses API contract (from Hermes reference):
   //   instructions: system prompt
   //   input: [{ role, content: [{type: 'input_text', text: '...'}] }]
-  //   store: false (Codex contract requires this)
+  //   store: false (required)
+  //   stream: true (required — Codex doesn't support non-streaming)
   const body: any = {
     model,
     input: [{
@@ -150,45 +208,31 @@ async function callOpenAICodex(input: CompletionInput, cred: LoadedCred): Promis
     }],
     max_output_tokens: input.maxTokens || 4096,
     store: false,
-    stream: false,
+    stream: true,
   }
   if (input.systemPrompt) body.instructions = input.systemPrompt
   if (typeof input.temperature === 'number') body.temperature = input.temperature
 
   const res = await fetch(`${cred.baseUrl}/responses`, {
     method: 'POST',
-    headers: codexHeaders(cred.accessToken),
+    headers: { ...codexHeaders(cred.accessToken), 'Accept': 'text/event-stream' },
     body: JSON.stringify(body),
   })
 
   if (!res.ok) {
-    const text = await res.text().catch(() => '')
-    throw new Error(`Codex API failed: HTTP ${res.status} ${text.slice(0, 300)}`)
+    const errText = await res.text().catch(() => '')
+    throw new Error(`Codex API failed: HTTP ${res.status} ${errText.slice(0, 300)}`)
   }
 
-  const data = await res.json()
-
-  // Extract text from Responses API format
-  let text = ''
-  if (data.output_text) {
-    text = data.output_text
-  } else if (Array.isArray(data.output)) {
-    for (const item of data.output) {
-      if (item.type === 'message' && Array.isArray(item.content)) {
-        for (const c of item.content) {
-          if (c.type === 'output_text' && c.text) text += c.text
-        }
-      }
-    }
-  }
+  const { text, usage } = await readCodexStream(res)
 
   return {
     text,
     model,
     provider: 'openai-codex',
-    usage: data.usage ? {
-      input_tokens: data.usage.input_tokens,
-      output_tokens: data.usage.output_tokens,
+    usage: usage ? {
+      input_tokens: usage.input_tokens,
+      output_tokens: usage.output_tokens,
     } : undefined,
   }
 }
