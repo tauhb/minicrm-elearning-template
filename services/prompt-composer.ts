@@ -29,6 +29,18 @@ const HTML_RUNTIME_RULES = `
 - Copy tiếng Việt, dùng "bạn"
 `
 
+const BLOCK_RUNTIME_RULES = `
+# RUNTIME OUTPUT RULES (BẮT BUỘC — render 1 BLOCK duy nhất)
+- Output PHẢI là 1 <section> element duy nhất (hoặc <div>) — KHÔNG có <!DOCTYPE>, <html>, <head>, <body>
+- Section dùng Tailwind classes (Tailwind CDN sẽ load ở shell)
+- Nếu block có CTA: button có \`data-cta="1"\`
+- Nếu block có form: form với \`action="/api/f/submit" method="POST" data-form="1"\`
+- Responsive: mobile-first classes (md:, lg:)
+- Copy tiếng Việt, "bạn" (không "anh/chị")
+- KHÔNG markdown wrapper, chỉ HTML section
+- Section padding: py-16 md:py-24. Container: max-w-6xl mx-auto px-6
+`
+
 const BLOCK_TO_HTML_GUIDE = `
 # BLOCK → HTML RENDERING GUIDE
 
@@ -163,6 +175,111 @@ export async function composeDraftPrompts(input: ComposeDraftInput): Promise<{ s
   ]
 
   return { system, user: userLines.join('\n') }
+}
+
+// ─── PHASE 2B: Per-block render (avoid max-output-tokens + parallelize) ────────
+export interface ComposeBlockRenderInput {
+  funnelId: string
+  block: { kind: string; content: any }
+  style: StyleInstructions
+  stepMeta: { name: string; page_type: string; has_form: boolean; form_fields?: any[] }
+}
+
+export async function composeBlockRenderPrompts(input: ComposeBlockRenderInput): Promise<{ system: string; user: string }> {
+  const base = await resolveBasePrompt(input.funnelId)
+
+  const parts: string[] = []
+  if (base.prompt) parts.push(base.prompt)
+  parts.push('---\n\n' + styleInstructionsBlock(input.style))
+  parts.push('---\n\n' + BLOCK_TO_HTML_GUIDE)
+  parts.push('---\n\n' + BLOCK_RUNTIME_RULES)
+
+  const system = parts.join('\n\n')
+
+  const userLines: string[] = [
+    `# Render 1 block cho step: ${input.stepMeta.name} (${input.stepMeta.page_type})`,
+    ``,
+    `# Block content`,
+    `Kind: **${input.block.kind}**`,
+    ``,
+    '```json',
+    JSON.stringify(input.block.content, null, 2),
+    '```',
+    ``,
+  ]
+  if (input.stepMeta.has_form && input.block.kind.includes('form') && input.stepMeta.form_fields?.length) {
+    userLines.push(`# Form fields (BẮT BUỘC render với đúng name attributes)`)
+    for (const f of input.stepMeta.form_fields) {
+      userLines.push(`- name="${f.name}" type="${f.type}" ${f.required ? 'required' : ''} label="${f.label}"`)
+    }
+    userLines.push('')
+  }
+  userLines.push(
+    `# Task`,
+    `Render block này thành 1 <section> HTML với Tailwind. Giữ content text đúng. Follow BLOCK_RUNTIME_RULES.`,
+  )
+
+  return { system, user: userLines.join('\n') }
+}
+
+/**
+ * Build HTML shell (head + body wrapper) around concatenated block HTMLs.
+ * Static — no AI call needed. Includes Tailwind CDN + Google Fonts + form JS.
+ */
+export function buildHtmlShell(opts: {
+  title: string
+  style: StyleInstructions
+  bodyContent: string   // concatenated block HTMLs
+}): string {
+  const font = opts.style.fontPair || 'Inter+Playfair Display'
+  const fontLinks = fontPairToGoogleFontsHref(font)
+  const bodyFont = fontFamily(font, 'body')
+  const headingFont = fontFamily(font, 'heading')
+  const brand = opts.style.brandColor || '#B6FF00'
+
+  return `<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>${escapeHtml(opts.title)}</title>
+<script src="https://cdn.tailwindcss.com"></script>
+${fontLinks}
+<style>
+  :root { --brand: ${brand}; }
+  body { font-family: ${bodyFont}; }
+  h1, h2, h3, h4 { font-family: ${headingFont}; }
+  [data-cta="1"] { background: var(--brand); transition: opacity .2s; }
+  [data-cta="1"]:hover { opacity: 0.9; }
+</style>
+</head>
+<body class="bg-white text-neutral-900">
+${opts.bodyContent}
+</body>
+</html>`
+}
+
+const FONT_PAIR_MAP: Record<string, { body: string; heading: string; family: [string, string] }> = {
+  'Inter+Playfair Display':      { body: 'Inter, system-ui, sans-serif', heading: '"Playfair Display", Georgia, serif', family: ['Inter:wght@400;500;600;700', 'Playfair+Display:wght@400;700;900&display=swap'] },
+  'Manrope+Fraunces':             { body: 'Manrope, system-ui, sans-serif', heading: '"Fraunces", Georgia, serif', family: ['Manrope:wght@400;500;700', 'Fraunces:wght@400;700;900&display=swap'] },
+  'IBM Plex Sans+IBM Plex Serif': { body: '"IBM Plex Sans", sans-serif', heading: '"IBM Plex Serif", Georgia, serif', family: ['IBM+Plex+Sans:wght@400;500;700', 'IBM+Plex+Serif:wght@400;700&display=swap'] },
+  'Space Grotesk+Instrument Serif': { body: '"Space Grotesk", sans-serif', heading: '"Instrument Serif", Georgia, serif', family: ['Space+Grotesk:wght@400;500;700', 'Instrument+Serif:wght@400&display=swap'] },
+  'System': { body: 'system-ui, -apple-system, sans-serif', heading: 'system-ui, -apple-system, sans-serif', family: [] },
+}
+
+function fontFamily(pair: string, which: 'body' | 'heading'): string {
+  return (FONT_PAIR_MAP[pair] || FONT_PAIR_MAP.System)[which]
+}
+
+function fontPairToGoogleFontsHref(pair: string): string {
+  const p = FONT_PAIR_MAP[pair] || FONT_PAIR_MAP.System
+  if (!p.family.length) return ''
+  const families = p.family.map(f => `family=${f}`).join('&')
+  return `<link href="https://fonts.googleapis.com/css2?${families}" rel="stylesheet">`
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 }
 
 // ─── PHASE 2: Render (JSON → HTML) ────────────────────────────────────────────

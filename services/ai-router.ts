@@ -206,12 +206,12 @@ async function callOpenAICodex(input: CompletionInput, cred: LoadedCred): Promis
       role: 'user',
       content: [{ type: 'input_text', text: input.userPrompt }],
     }],
-    max_output_tokens: input.maxTokens || 4096,
     store: false,
     stream: true,
   }
   if (input.systemPrompt) body.instructions = input.systemPrompt
-  if (typeof input.temperature === 'number') body.temperature = input.temperature
+  // NOTE: Codex chatgpt.com/backend-api rejects max_output_tokens + temperature.
+  // Let Codex use its own defaults.
 
   const res = await fetch(`${cred.baseUrl}/responses`, {
     method: 'POST',

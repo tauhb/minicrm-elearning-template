@@ -13,7 +13,7 @@
 
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { createClient } from '@supabase/supabase-js'
-import { composeDraftPrompts, composeRenderPrompts, StyleInstructions } from '../../services/prompt-composer'
+import { composeDraftPrompts, composeBlockRenderPrompts, buildHtmlShell, StyleInstructions } from '../../services/prompt-composer'
 import { runCompletion } from '../../services/ai-router'
 
 const CORS = {
@@ -187,7 +187,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.json({ draft, version_number: nextNum, meta: { provider: result.provider, model: result.model, usage: result.usage } })
     }
 
-    // Action: APPROVE — render HTML from approved copy_draft
+    // Action: APPROVE — render HTML from approved copy_draft using PER-BLOCK generation
+    // Each block → 1 small AI call (avoids max_output_tokens limits + faster in parallel)
     if (action === 'approve' && id) {
       const { data: step } = await admin.from('funnel_steps').select('*').eq('id', id).single()
       if (!step) return res.status(404).json({ error: 'Step not found' })
@@ -195,41 +196,91 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return res.status(400).json({ error: 'Step chưa có copy_draft. Draft trước rồi mới approve.' })
       }
       const body = req.body || {}
-      const editedDraft = body.copy_draft || step.copy_draft  // Allow user-edited draft
+      const editedDraft = body.copy_draft || step.copy_draft
+      const blocks = (editedDraft.blocks || []) as Array<{ kind: string; content: any }>
       const { data: flow } = await admin.from('funnel_flows').select('style_preset').eq('id', step.funnel_id).single()
+      const style = (flow?.style_preset || {}) as StyleInstructions
 
-      const { system, user } = await composeRenderPrompts({
-        funnelId: step.funnel_id, stepId: id,
-        copyDraft: editedDraft,
-        style: (flow?.style_preset || {}) as StyleInstructions,
-        stepMeta: {
-          name: step.name, page_type: step.page_type,
-          has_form: step.has_form, form_fields: step.form_fields,
-        },
+      // Render each block in parallel with limited concurrency (Codex rate-limit friendly)
+      const stepMeta = {
+        name: step.name, page_type: step.page_type,
+        has_form: step.has_form, form_fields: step.form_fields,
+      }
+
+      const CONCURRENCY = 3   // ≤3 concurrent Codex calls
+      const results: Array<{ index: number; html: string; error?: string; usage?: any }> = []
+
+      async function renderOne(block: { kind: string; content: any }, index: number) {
+        // Custom blocks: use content.html directly if provided, skip AI call
+        if (block.kind === 'custom' && block.content?.html) {
+          results.push({ index, html: `<section class="py-16 md:py-24">${block.content.html}</section>` })
+          return
+        }
+        try {
+          const { system, user } = await composeBlockRenderPrompts({
+            funnelId: step.funnel_id, block, style, stepMeta,
+          })
+          const r = await runCompletion({
+            provider: 'openai-codex', model: body.model,
+            systemPrompt: system, userPrompt: user,
+          })
+          let sectionHtml = r.text.trim()
+          const fence = sectionHtml.match(/^```(?:html)?\s*\n?([\s\S]*?)\n?```$/)
+          if (fence) sectionHtml = fence[1].trim()
+          // Strip if AI accidentally wrapped in <!DOCTYPE>/<body>
+          sectionHtml = sectionHtml.replace(/^[\s\S]*?<body[^>]*>/i, '').replace(/<\/body>[\s\S]*$/i, '').trim()
+          if (!sectionHtml) sectionHtml = `<!-- block ${block.kind} empty -->`
+          results.push({ index, html: sectionHtml, usage: r.usage })
+        } catch (e: any) {
+          results.push({ index, html: `<!-- block ${block.kind} error: ${e.message.slice(0, 80)} -->`, error: e.message })
+        }
+      }
+
+      // Batched parallel execution
+      for (let i = 0; i < blocks.length; i += CONCURRENCY) {
+        const batch = blocks.slice(i, i + CONCURRENCY)
+        await Promise.all(batch.map((b, j) => renderOne(b, i + j)))
+      }
+
+      // Concat in original order
+      results.sort((a, b) => a.index - b.index)
+      const errors = results.filter(r => r.error).map(r => r.error!)
+      const bodyContent = results.map(r => r.html).join('\n\n')
+
+      // Wrap in HTML shell (Tailwind + Google Fonts + brand color)
+      let html = buildHtmlShell({
+        title: step.name,
+        style,
+        bodyContent,
       })
-
-      const result = await runCompletion({
-        provider: 'openai-codex', model: body.model,
-        systemPrompt: system, userPrompt: user,
-        maxTokens: 16000, temperature: 0.5,
-      })
-
-      let html = result.text.trim()
-      const fence = html.match(/^```(?:html)?\s*\n?([\s\S]*?)\n?```$/)
-      if (fence) html = fence[1].trim()
-      if (!html.toLowerCase().startsWith('<!doctype')) html = `<!DOCTYPE html>\n${html}`
 
       // Inject hidden form fields for funnel_id/step_id
       html = injectFormHiddens(html, step.funnel_id, id)
 
+      // Aggregate usage
+      const totalUsage = results.reduce((acc, r) => {
+        if (r.usage) {
+          acc.input_tokens = (acc.input_tokens || 0) + (r.usage.input_tokens || 0)
+          acc.output_tokens = (acc.output_tokens || 0) + (r.usage.output_tokens || 0)
+        }
+        return acc
+      }, { input_tokens: 0, output_tokens: 0 } as any)
+
       await admin.from('funnel_steps').update({
         copy_draft: editedDraft, copy_approved: true, copy_approved_at: new Date().toISOString(),
         html, html_generated_from_copy_at: new Date().toISOString(),
-        generation_meta: { provider: result.provider, model: result.model, usage: result.usage, generatedAt: new Date().toISOString() },
+        generation_meta: {
+          provider: 'openai-codex', model: body.model || 'gpt-5.6-sol',
+          usage: totalUsage, generatedAt: new Date().toISOString(),
+          blocks_rendered: results.length, block_errors: errors.length,
+        },
         updated_at: new Date().toISOString(),
       }).eq('id', id)
 
-      return res.json({ html, meta: { provider: result.provider, model: result.model, usage: result.usage } })
+      return res.json({
+        html,
+        meta: { blocks_rendered: results.length, block_errors: errors.length, usage: totalUsage, errors: errors.slice(0, 5) },
+      })
     }
 
     // Action: IMPORT — save external HTML with transforms

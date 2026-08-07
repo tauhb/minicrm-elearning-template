@@ -1038,10 +1038,10 @@ async function handleAIGenerate(req, res) {
     const body = {
       model,
       input: [{ role: 'user', content: [{ type: 'input_text', text: userPrompt }] }],
-      max_output_tokens: maxTokens, temperature,
       store: false, stream: true,
     }
     if (systemPrompt) body.instructions = systemPrompt
+    // NOTE: Codex chatgpt.com/backend-api rejects max_output_tokens + temperature.
     const resp = await fetch(`${cred.baseUrl}/responses`, {
       method: 'POST',
       headers: { ..._codexHeaders(cred.accessToken), 'Accept': 'text/event-stream' },
