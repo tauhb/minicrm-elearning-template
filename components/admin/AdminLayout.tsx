@@ -15,6 +15,7 @@ const AIFunnelsView = React.lazy(() => import('./AIFunnelsView'))
 const ChatView = React.lazy(() => import('./ChatView'))
 const TasksView = React.lazy(() => import('./TasksView'))
 const EmailMarketingView = React.lazy(() => import('./EmailMarketingView'))
+import NotificationCenter from './NotificationCenter'
 
 const NAV_ITEMS = [
   { to: '/admin',          label: 'Tổng quan',      icon: LayoutDashboard, end: true },
@@ -73,7 +74,7 @@ const AdminLayout: React.FC = () => {
       {/* Sidebar */}
       <aside className="w-64 bg-gray-900 border-r border-gray-800 flex flex-col shrink-0">
 
-        {/* Logo */}
+        {/* Logo + notification bell */}
         <div className="h-16 flex items-center gap-3 px-5 border-b border-gray-800">
           <div
             className="w-8 h-8 flex items-center justify-center font-bold text-sm"
@@ -81,10 +82,11 @@ const AdminLayout: React.FC = () => {
           >
             <Terminal size={16} />
           </div>
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             <p className="text-xs font-bold text-white uppercase tracking-widest truncate">{appTitle}</p>
             <p className="text-[10px] text-gray-500">Portal Management</p>
           </div>
+          <NotificationCenter />
         </div>
 
         {/* Navigation */}
