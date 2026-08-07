@@ -84,43 +84,42 @@ export default function ChatView() {
   }, [loadList])
 
   return (
-    <div className="h-[calc(100vh-80px)] flex bg-neutral-950">
-      {/* LEFT: filters + conversation list */}
+    <div className="h-[calc(100vh-80px)] flex flex-col bg-neutral-950">
+      {/* TOP BAR: title + filters + settings (spans full width) */}
+      <div className="border-b border-neutral-800 px-4 py-2.5 flex items-center gap-3 flex-shrink-0">
+        <div className="flex items-center gap-2 mr-2">
+          <MessageCircle className="w-5 h-5" style={{ color: 'var(--color-mission-accent)' }} />
+          <h2 className="font-semibold">Chat</h2>
+        </div>
+        <select value={filter.status} onChange={e => setFilter(f => ({ ...f, status: e.target.value }))}
+          className="px-2 py-1 bg-neutral-900 border border-neutral-800 rounded text-xs min-w-[110px]">
+          <option value="open">Open</option>
+          <option value="pending">Pending</option>
+          <option value="snoozed">Snoozed</option>
+          <option value="resolved">Resolved</option>
+          <option value="">All statuses</option>
+        </select>
+        <select value={filter.assignee} onChange={e => setFilter(f => ({ ...f, assignee: e.target.value as any }))}
+          className="px-2 py-1 bg-neutral-900 border border-neutral-800 rounded text-xs min-w-[140px]">
+          <option value="">Anyone</option>
+          <option value="me">Assigned to me</option>
+          <option value="unassigned">Unassigned</option>
+        </select>
+        <select value={filter.inbox_id} onChange={e => setFilter(f => ({ ...f, inbox_id: e.target.value }))}
+          className="px-2 py-1 bg-neutral-900 border border-neutral-800 rounded text-xs min-w-[160px]">
+          <option value="">All inboxes ({inboxes.length})</option>
+          {inboxes.map(i => <option key={i.id} value={i.id}>{i.name}</option>)}
+        </select>
+        <div className="flex-1" />
+        <button onClick={() => setInboxManagerOpen(true)}
+          className="p-1.5 hover:bg-neutral-800 rounded" title="Manage inboxes">
+          <Settings className="w-4 h-4" />
+        </button>
+      </div>
+
+      <div className="flex flex-1 min-h-0">
+      {/* LEFT: conversation list */}
       <div className="w-80 border-r border-neutral-800 flex flex-col flex-shrink-0">
-        <div className="p-3 border-b border-neutral-800 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <MessageCircle className="w-5 h-5" style={{ color: 'var(--color-mission-accent)' }} />
-            <h2 className="font-semibold">Chat</h2>
-          </div>
-          <button onClick={() => setInboxManagerOpen(true)}
-            className="p-1.5 hover:bg-neutral-800 rounded" title="Manage inboxes">
-            <Settings className="w-4 h-4" />
-          </button>
-        </div>
-
-        {/* Filters */}
-        <div className="p-3 border-b border-neutral-800 space-y-2">
-          <select value={filter.status} onChange={e => setFilter(f => ({ ...f, status: e.target.value }))}
-            className="w-full px-2 py-1.5 bg-neutral-900 border border-neutral-800 rounded text-xs">
-            <option value="open">Open</option>
-            <option value="pending">Pending</option>
-            <option value="snoozed">Snoozed</option>
-            <option value="resolved">Resolved</option>
-            <option value="">All</option>
-          </select>
-          <select value={filter.assignee} onChange={e => setFilter(f => ({ ...f, assignee: e.target.value as any }))}
-            className="w-full px-2 py-1.5 bg-neutral-900 border border-neutral-800 rounded text-xs">
-            <option value="">Anyone</option>
-            <option value="me">Assigned to me</option>
-            <option value="unassigned">Unassigned</option>
-          </select>
-          <select value={filter.inbox_id} onChange={e => setFilter(f => ({ ...f, inbox_id: e.target.value }))}
-            className="w-full px-2 py-1.5 bg-neutral-900 border border-neutral-800 rounded text-xs">
-            <option value="">All inboxes ({inboxes.length})</option>
-            {inboxes.map(i => <option key={i.id} value={i.id}>{i.name}</option>)}
-          </select>
-        </div>
-
         {/* Conversation list */}
         <div className="flex-1 overflow-y-auto">
           {loading ? (
@@ -175,6 +174,8 @@ export default function ChatView() {
         )}
       </div>
 
+      </div>{/* /flex flex-1 */}
+
       {inboxManagerOpen && (
         <InboxManagerModal inboxes={inboxes} onClose={() => setInboxManagerOpen(false)} onSaved={loadInboxes} />
       )}
@@ -207,6 +208,8 @@ function ConversationDetail({ conversationId, onUpdate }: { conversationId: stri
   useEffect(() => { load() }, [load])
 
   // Realtime: subscribe to new messages IN THIS conversation
+  // Dedup by message id — StrictMode double-mount, retry, or overlapping subscriptions
+  // must never cause the same message to appear twice.
   useEffect(() => {
     const channel = supabase
       .channel(`chat-conv-${conversationId}`)
@@ -215,7 +218,11 @@ function ConversationDetail({ conversationId, onUpdate }: { conversationId: stri
         filter: `conversation_id=eq.${conversationId}`,
       }, payload => {
         const newMsg = payload.new as any
-        setDetail(prev => prev ? { ...prev, messages: [...prev.messages, newMsg] } : prev)
+        setDetail(prev => {
+          if (!prev) return prev
+          if (prev.messages.some(m => m.id === newMsg.id)) return prev
+          return { ...prev, messages: [...prev.messages, newMsg] }
+        })
       })
       .subscribe()
     return () => { supabase.removeChannel(channel) }
@@ -226,17 +233,27 @@ function ConversationDetail({ conversationId, onUpdate }: { conversationId: stri
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight
   }, [detail?.messages?.length])
 
+  // Ref guard against re-entry: setSending(true) is async, so a second Enter
+  // fired within the same tick would slip through and POST twice.
+  const sendingRef = useRef(false)
   const send = async () => {
+    if (sendingRef.current) return
     if (!reply.trim()) return
+    sendingRef.current = true
     setSending(true)
+    // Snapshot + optimistic clear so a paused server call can't be double-sent
+    const content = reply
+    setReply('')
     try {
       await api(`/api/chat/conversations?action=${isNote ? 'note' : 'reply'}&id=${conversationId}`, {
-        method: 'POST', body: JSON.stringify({ content: reply }),
+        method: 'POST', body: JSON.stringify({ content }),
       })
-      setReply('')
       onUpdate()
-    } catch (e: any) { alert(e.message) }
-    finally { setSending(false) }
+    } catch (e: any) {
+      setReply(content)   // restore on failure so user can retry
+      alert(e.message)
+    }
+    finally { sendingRef.current = false; setSending(false) }
   }
 
   const changeStatus = async (status: string) => {
