@@ -21,6 +21,7 @@ interface FunnelDetail extends FunnelListItem {
   payment_config: any
   tags_to_apply: string[]
   custom_domain: string | null
+  chat_widget_inbox_id?: string | null
   steps: StepDetail[]
 }
 interface StepDetail {
@@ -420,6 +421,29 @@ function FunnelDetailView({ id, onBack }: { id: string; onBack: () => void }) {
   const [addStepOpen, setAddStepOpen] = useState(false)
   const [paymentDrawerOpen, setPaymentDrawerOpen] = useState(false)
   const [previewOpen, setPreviewOpen] = useState(false)
+  const [chatDrawerOpen, setChatDrawerOpen] = useState(false)
+  const [chatInboxes, setChatInboxes] = useState<Array<{ id: string; name: string }>>([])
+
+  useEffect(() => {
+    api<{ inboxes: Array<{ id: string; name: string }> }>('/api/chat/inboxes')
+      .then(r => setChatInboxes(r.inboxes || []))
+      .catch(() => {})
+  }, [])
+
+  const setChatInbox = async (inboxId: string | null) => {
+    if (!funnel) return
+    try {
+      await api('/api/funnel-flows', {
+        method: 'POST',
+        body: JSON.stringify({
+          id: funnel.id, name: funnel.name, type_key: funnel.type_key,
+          chat_widget_inbox_id: inboxId,
+        }),
+      })
+      load()
+      setChatDrawerOpen(false)
+    } catch (e: any) { alert(e.message) }
+  }
 
   const moveStep = async (stepId: string, dir: -1 | 1) => {
     if (!funnel) return
@@ -526,6 +550,28 @@ function FunnelDetailView({ id, onBack }: { id: string; onBack: () => void }) {
               <Check className="w-3 h-3 text-green-400" />
             )}
           </button>
+          <div className="relative">
+            <button onClick={() => setChatDrawerOpen(!chatDrawerOpen)}
+              className="inline-flex items-center gap-1 text-sm px-3 py-1.5 border border-neutral-700 rounded-lg hover:bg-neutral-800"
+              title="Chat widget on funnel pages">
+              💬 Chat
+              {funnel.chat_widget_inbox_id && <Check className="w-3 h-3 text-green-400" />}
+            </button>
+            {chatDrawerOpen && (
+              <div className="absolute top-full right-0 mt-1 z-10 bg-neutral-900 border border-neutral-800 rounded-lg shadow-xl p-3 w-64">
+                <label className="text-xs text-neutral-500 uppercase tracking-wider block mb-2">Chat widget cho funnel</label>
+                <select value={funnel.chat_widget_inbox_id || ''} onChange={e => setChatInbox(e.target.value || null)}
+                  className="w-full px-2 py-1.5 bg-neutral-950 border border-neutral-800 rounded text-sm">
+                  <option value="">(Tắt — không có widget)</option>
+                  {chatInboxes.map(i => <option key={i.id} value={i.id}>{i.name}</option>)}
+                </select>
+                <p className="text-[10px] text-neutral-500 mt-2">
+                  Widget hiển thị floating button ở landing pages đã publish.
+                  <br />Manage inboxes: <a href="/admin/chat" className="text-blue-400 hover:underline">Chat → Settings</a>
+                </p>
+              </div>
+            )}
+          </div>
           {funnel.status === 'published' && (
             <a href={`/f/${funnel.slug}`} target="_blank" rel="noopener noreferrer"
               className="inline-flex items-center gap-1 text-sm px-3 py-1.5 border border-neutral-700 rounded-lg hover:bg-neutral-800">

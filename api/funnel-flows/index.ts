@@ -105,6 +105,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         updated_at: new Date().toISOString(),
       }
 
+      if (body.chat_widget_inbox_id !== undefined) {
+        payload.chat_widget_inbox_id = body.chat_widget_inbox_id || null
+      }
+
       // Handle payment_config — encrypt webhook_secret if provided (as plaintext)
       if (body.payment_config !== undefined) {
         const pc = { ...body.payment_config }

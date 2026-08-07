@@ -97,7 +97,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   )
 
   const { data: flow } = await admin.from('funnel_flows')
-    .select('id, status').eq('slug', funnelSlug).maybeSingle()
+    .select('id, slug, status, chat_widget_inbox_id').eq('slug', funnelSlug).maybeSingle()
 
   if (!flow) {
     res.setHeader('Content-Type', 'text/html; charset=utf-8')
@@ -145,6 +145,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
   const inject = trackingScript(flow.id, step.id, portalBase)
   html = html.includes('</body>') ? html.replace('</body>', `${inject}\n</body>`) : html + inject
+
+  // Auto-inject chat widget if this funnel has one configured
+  if ((flow as any).chat_widget_inbox_id) {
+    const { data: inbox } = await admin.from('chat_inboxes')
+      .select('website_token, is_active').eq('id', (flow as any).chat_widget_inbox_id).maybeSingle()
+    if (inbox?.is_active && inbox.website_token) {
+      const widgetInject = `<script>window.__FUNNEL_SLUG__='${flow.slug}';window.__FUNNEL_ID__='${flow.id}';window.__STEP_SLUG__='${step.name}';window.__STEP_ID__='${step.id}';</script>
+<script src="${portalBase}/api/chat/widget/embed.js?token=${inbox.website_token}" async></script>`
+      html = html.includes('</body>') ? html.replace('</body>', `${widgetInject}\n</body>`) : html + widgetInject
+    }
+  }
 
   res.setHeader('Content-Type', 'text/html; charset=utf-8')
   res.setHeader('X-Robots-Tag', 'index, follow')
