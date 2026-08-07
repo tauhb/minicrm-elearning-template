@@ -1,16 +1,18 @@
 import React, { useEffect, useState, useMemo } from 'react'
+import { useNavigate, Link } from 'react-router-dom'
 import {
   Users, Bell, DollarSign, Activity,
   Phone, FileText, Mail, AlertCircle,
   BarChart2, GitBranch, TrendingUp, TrendingDown, Minus,
   Square, ArrowRight,
+  Sparkles, List, Upload, Rocket,
 } from 'lucide-react'
-import { Link } from 'react-router-dom'
 import { fetchDashboardStats, fetchRecentActivity, completeTask } from '../../services/api'
 import { DashboardStats } from '../../types'
 import { formatDistanceToNow, format } from 'date-fns'
 import { vi } from 'date-fns/locale'
 import { supabase } from '../../services/supabase'
+import OnboardingChecklist from './OnboardingChecklist'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -220,6 +222,7 @@ const TimeRangePicker: React.FC<{ value: TimeRange; onChange: (v: TimeRange) => 
 // ─── Dashboard ────────────────────────────────────────────────────────────────
 
 const Dashboard: React.FC = () => {
+  const navigate = useNavigate()
   const [timeRange, setTimeRange] = useState<TimeRange>('30d')
   const bounds = useMemo(() => getDateBounds(timeRange), [timeRange])
 
@@ -244,12 +247,27 @@ const Dashboard: React.FC = () => {
   const [periodRevenue, setPeriodRevenue]       = useState(0)
   const [prevRevenue, setPrevRevenue]           = useState(0)
 
+  // Onboarding empty-state counts (Track D)
+  const [teamCount, setTeamCount]     = useState<number | null>(null)
+  const [funnelCount, setFunnelCount] = useState<number | null>(null)
+
   // ── Core stats (time-range-aware) ──
   useEffect(() => {
     setCoreLoading(true)
     Promise.all([fetchDashboardStats(), fetchRecentActivity()])
       .then(([s, a]) => { setStats(s); setActivity(a) })
       .finally(() => setCoreLoading(false))
+  }, [])
+
+  // ── Onboarding counts (Track D) ──
+  useEffect(() => {
+    Promise.all([
+      supabase.from('customers').select('id', { count: 'exact', head: true }).neq('role', 'student'),
+      supabase.from('funnel_flows').select('id', { count: 'exact', head: true }),
+    ]).then(([t, f]) => {
+      setTeamCount(t.count ?? 0)
+      setFunnelCount(f.count ?? 0)
+    }).catch(() => { setTeamCount(0); setFunnelCount(0) })
   }, [])
 
   // ── Widgets (re-fetch when timeRange changes) ──
@@ -392,6 +410,37 @@ const Dashboard: React.FC = () => {
         </div>
         <TimeRangePicker value={timeRange} onChange={setTimeRange} />
       </div>
+
+      {/* ── Onboarding checklist (Track D) — self-hides when done or dismissed ── */}
+      <OnboardingChecklist />
+
+      {/* ── Welcome empty-state — only when truly empty (no leads/team/funnels) ── */}
+      {teamCount === 0 && funnelCount === 0 && totalLeads === 0 && (
+        <div className="mb-8 p-8 rounded-lg border" style={{ borderColor: 'var(--theme-border)', background: 'var(--theme-surface)' }}>
+          <div className="flex items-start gap-4">
+            <div className="w-12 h-12 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: 'var(--color-mission-accent)', color: '#000' }}>
+              <Rocket className="w-6 h-6" />
+            </div>
+            <div className="flex-1">
+              <h2 className="text-lg font-bold mb-1" style={{ color: 'var(--theme-text)' }}>Chào mừng anh/chị đến với CRM 🎉</h2>
+              <p className="text-sm mb-4" style={{ color: 'var(--theme-text-muted)' }}>
+                Chưa có dữ liệu — bắt đầu bằng cách tạo lead đầu tiên, tạo funnel AI, hoặc import CSV có sẵn.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <button onClick={() => navigate('/admin/leads')} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm rounded font-semibold" style={{ background: 'var(--color-mission-accent)', color: '#000' }}>
+                  <List className="w-3.5 h-3.5" /> Nhập lead đầu tiên
+                </button>
+                <button onClick={() => navigate('/admin/ai-funnels')} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm rounded border" style={{ borderColor: 'var(--theme-border)', color: 'var(--theme-text)' }}>
+                  <Sparkles className="w-3.5 h-3.5" /> Tạo funnel với AI
+                </button>
+                <button onClick={() => navigate('/admin/leads#import')} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm rounded border" style={{ borderColor: 'var(--theme-border)', color: 'var(--theme-text)' }}>
+                  <Upload className="w-3.5 h-3.5" /> Import CSV
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── KPI row — 5 cards ── */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-8">

@@ -1642,6 +1642,78 @@ async function handleEmailBroadcast(req, res) {
   return res.json({ success: true, sent, failed, total: recipients.length, errors: errors.slice(0, 20) })
 }
 
+// ─── Wave 1 Track D: handleHealthEnvCheck (admin-only env var status) ───────
+// Mirrors api/health/env-check.ts. Returns categorised {items[]} for HealthCheckTab.
+async function handleHealthEnvCheck(req, res) {
+  // Auth: admin/owner/sales/support only
+  const authHeader = req.headers.authorization
+  if (!authHeader?.startsWith('Bearer ')) return res.status(401).json({ error: 'Missing token' })
+  const token = authHeader.slice(7)
+  const userClient = createClient(process.env.VITE_SUPABASE_URL, process.env.VITE_SUPABASE_ANON_KEY,
+    { global: { headers: { Authorization: `Bearer ${token}` } } })
+  const { data: { user } } = await userClient.auth.getUser()
+  if (!user) return res.status(401).json({ error: 'Invalid token' })
+  const { data: caller } = await userClient.from('customers').select('role').eq('id', user.id).maybeSingle()
+  if (!['owner', 'admin', 'sales', 'support'].includes(caller?.role)) return res.status(403).json({ error: 'Admin only' })
+
+  const admin = createClient(process.env.VITE_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY,
+    { auth: { autoRefreshToken: false, persistSession: false } })
+
+  const items = []
+  const push = (key, label, category, present, hint, optional = false) => items.push({ key, label, category, present, hint, optional })
+
+  // Core
+  push('VITE_SUPABASE_URL',         'Supabase URL',              'core', !!process.env.VITE_SUPABASE_URL, 'Set trong .env.local')
+  push('VITE_SUPABASE_ANON_KEY',    'Supabase Anon Key',         'core', !!process.env.VITE_SUPABASE_ANON_KEY, 'Set trong .env.local')
+  push('SUPABASE_SERVICE_ROLE_KEY', 'Supabase Service Role Key', 'core', !!process.env.SUPABASE_SERVICE_ROLE_KEY, 'Server-only key, set trong .env.local')
+
+  // Supabase reachability
+  let supaOk = false
+  try {
+    const { error } = await admin.from('app_settings').select('key').limit(1)
+    supaOk = !error
+  } catch {}
+  push('supabase_reachable', 'Supabase reachable', 'core', supaOk, supaOk ? undefined : 'Không kết nối được. Chạy `supabase start` hoặc kiểm tra URL/key.')
+
+  // AI: OpenAI key OR OAuth session
+  let aiOk = !!process.env.OPENAI_API_KEY
+  let aiHint = 'Set OPENAI_API_KEY, hoặc dùng OAuth device flow qua /admin/settings tab AI.'
+  if (!aiOk) {
+    try {
+      const { count } = await admin.from('oauth_device_sessions').select('id', { count: 'exact', head: true }).eq('provider', 'openai-codex').eq('status', 'authorized')
+      if ((count || 0) > 0) { aiOk = true; aiHint = undefined }
+    } catch {}
+  } else { aiHint = undefined }
+  push('ai_provider', 'AI Provider (OpenAI key hoặc OAuth)', 'ai', aiOk, aiHint)
+
+  // Email
+  const emailProvider = process.env.EMAIL_PROVIDER
+  const brevoKey = !!process.env.BREVO_API_KEY
+  const resendKey = !!process.env.RESEND_API_KEY
+  let emailPresent = false, emailHint
+  if (!emailProvider) {
+    if (resendKey) { emailPresent = true; emailHint = 'EMAIL_PROVIDER chưa set. Dùng Resend cho transactional; set EMAIL_PROVIDER=brevo để có sequences.' }
+    else { emailHint = 'Set EMAIL_PROVIDER=brevo + BREVO_API_KEY trong .env, hoặc RESEND_API_KEY cho email giao dịch.' }
+  } else if (emailProvider === 'brevo') { emailPresent = brevoKey; emailHint = brevoKey ? undefined : 'EMAIL_PROVIDER=brevo nhưng thiếu BREVO_API_KEY.' }
+  else if (emailProvider === 'resend') { emailPresent = resendKey; emailHint = resendKey ? undefined : 'EMAIL_PROVIDER=resend nhưng thiếu RESEND_API_KEY.' }
+  push('email_provider', `Email (${emailProvider || 'chưa set'})`, 'email', emailPresent, emailHint)
+
+  // Payment
+  let payFunnels = 0
+  try {
+    const { count } = await admin.from('funnel_flows').select('id', { count: 'exact', head: true }).eq('payment_mode', 'inline_qr')
+    payFunnels = count || 0
+  } catch {}
+  push('sepay_configured', `SePay funnels đã cấu hình (${payFunnels})`, 'payment', payFunnels > 0, payFunnels > 0 ? undefined : 'Chưa có funnel nào bật inline_qr với account SePay.', true)
+
+  // Portal
+  const portalUrl = process.env.CUSTOMER_PORTAL_URL
+  push('CUSTOMER_PORTAL_URL', 'Customer Portal URL (magic link redirect)', 'portal', !!portalUrl, portalUrl ? undefined : 'N/A cho standalone install.', true)
+
+  const requiredOk = items.filter(i => !i.optional).every(i => i.present)
+  return res.status(200).json({ ok: requiredOk, timestamp: new Date().toISOString(), items })
+}
+
 async function handleHealth(req, res) {
   const checks = {}
   let allOk = true
@@ -1791,6 +1863,8 @@ const server = http.createServer(async (req, nodeRes) => {
       await handleEmailSend(mockReq, res)
     } else if (req.url === '/api/email/broadcast') {
       await handleEmailBroadcast(mockReq, res)
+    } else if (req.url === '/api/health/env-check' || req.url?.startsWith('/api/health/env-check?')) {
+      await handleHealthEnvCheck(mockReq, res)
     } else if (req.url === '/api/health' || req.url?.startsWith('/api/health?')) {
       await handleHealth(mockReq, res)
     } else if (!req.url?.startsWith('/api/')) {

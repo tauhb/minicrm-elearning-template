@@ -6,8 +6,9 @@ import { useConfig } from '../../contexts/ConfigContext'
 import AISettingsView from './AISettingsView'
 import FunnelTypesView from './FunnelTypesView'
 import CopyFormulasView from './CopyFormulasView'
+import HealthCheckTab from './HealthCheckTab'
 
-type Tab = 'webhook' | 'email' | 'ai' | 'funnel-types' | 'copy-formulas' | 'general'
+type Tab = 'webhook' | 'email' | 'ai' | 'funnel-types' | 'copy-formulas' | 'health' | 'general'
 
 const THEMES: Array<{
   id: PortalTheme; name: string
@@ -52,9 +53,27 @@ const THEMES: Array<{
   },
 ]
 
+const VALID_TABS: Tab[] = ['webhook', 'email', 'ai', 'funnel-types', 'copy-formulas', 'health', 'general']
+
+const readTabFromHash = (): Tab | null => {
+  if (typeof window === 'undefined') return null
+  const h = window.location.hash.replace(/^#/, '') as Tab
+  return VALID_TABS.includes(h) ? h : null
+}
+
 const SettingsView: React.FC = () => {
   const { settings, updateSettings } = useConfig()
-  const [activeTab, setActiveTab] = useState<Tab>('webhook')
+  const [activeTab, setActiveTab] = useState<Tab>(() => readTabFromHash() || 'webhook')
+
+  // Sync with URL hash so external links (e.g. onboarding checklist) can deep-link
+  useEffect(() => {
+    const onHash = () => {
+      const t = readTabFromHash()
+      if (t) setActiveTab(t)
+    }
+    window.addEventListener('hashchange', onHash)
+    return () => window.removeEventListener('hashchange', onHash)
+  }, [])
 
   // Webhook state
   const [webhookSecret, setWebhookSecret] = useState('')
@@ -224,11 +243,17 @@ const SettingsView: React.FC = () => {
           { key: 'ai', label: 'AI Providers', icon: Sparkles },
           { key: 'funnel-types', label: 'Funnel Types', icon: Layers },
           { key: 'copy-formulas', label: 'Copy Formulas', icon: PenLine },
+          { key: 'health', label: 'Health check', icon: Activity },
           { key: 'general', label: 'Chung', icon: Sliders },
         ] as { key: Tab; label: string; icon: React.FC<any> }[]).map(tab => (
           <button
             key={tab.key}
-            onClick={() => setActiveTab(tab.key)}
+            onClick={() => {
+              setActiveTab(tab.key)
+              if (typeof window !== 'undefined') {
+                history.replaceState(null, '', `#${tab.key}`)
+              }
+            }}
             className={`flex items-center gap-2 px-4 py-2 text-sm border-b-2 transition-all -mb-px ${activeTab === tab.key ? '' : 'border-transparent text-gray-500 hover:text-white'}`}
             style={activeTab === tab.key ? {
               borderColor: 'var(--color-mission-accent)',
@@ -736,6 +761,7 @@ async function provisionAfterPayment(payment) {
       {activeTab === 'ai' && <AISettingsView />}
       {activeTab === 'funnel-types' && <FunnelTypesView />}
       {activeTab === 'copy-formulas' && <CopyFormulasView />}
+      {activeTab === 'health' && <HealthCheckTab />}
 
       {activeTab === 'general' && (
         <div className="space-y-6">
