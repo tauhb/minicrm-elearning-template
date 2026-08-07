@@ -27,8 +27,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method === 'OPTIONS') return res.status(200).json({})
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
 
-  const action = (req.query.action as string) || ''
-  const id = (req.query.id as string) || ''
+  // Parse from URL (works both on Vercel + dev api-server, which doesn't populate req.query)
+  const url = new URL(req.url || '', 'http://localhost')
+  const action = url.searchParams.get('action') || ''
+  const id = url.searchParams.get('id') || ''
   if (!ALLOWED_ACTIONS.has(action)) return res.status(400).json({ error: `Unknown action: ${action}` })
   if (!id) return res.status(400).json({ error: 'Thiếu id khách hàng' })
 
