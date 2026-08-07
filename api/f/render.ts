@@ -5,6 +5,82 @@
 
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { createClient } from '@supabase/supabase-js'
+import { parse as parseHtml } from 'node-html-parser'
+
+/**
+ * Guarantee funnel navigation works regardless of what AI generated:
+ *   - Every <form>: force action="/api/f/submit", method="POST", data-form="1",
+ *     and hidden inputs funnel_id + step_id (add or overwrite value if present).
+ *   - Every <a data-cta> without href → href = next step URL (skip when no next step).
+ *   - <button data-cta> outside a form → wire via delegated JS (injected below).
+ */
+function wireFunnelNavigation(
+  html: string,
+  funnelId: string,
+  stepId: string,
+  funnelSlug: string,
+  nextStepSlug?: string,
+): string {
+  const root = parseHtml(html, { comment: true, blockTextElements: { script: true, style: true, pre: true } })
+  const nextUrl = nextStepSlug ? `/f/${funnelSlug}/${nextStepSlug}` : ''
+
+  // ── Forms
+  const forms = root.querySelectorAll('form')
+  for (const form of forms) {
+    form.setAttribute('action', '/api/f/submit')
+    form.setAttribute('method', 'POST')
+    if (!form.hasAttribute('data-form')) form.setAttribute('data-form', '1')
+
+    const setHidden = (name: string, value: string) => {
+      const existing = form.querySelector(`input[name="${name}"]`)
+      if (existing) {
+        existing.setAttribute('value', value)
+        existing.setAttribute('type', 'hidden')
+      } else {
+        // Prepend so hidden fields don't get lost after visible inputs
+        form.insertAdjacentHTML('afterbegin', `<input type="hidden" name="${name}" value="${value}">`)
+      }
+    }
+    setHidden('funnel_id', funnelId)
+    setHidden('step_id', stepId)
+  }
+
+  // ── <a data-cta>: overwrite unless href is real navigation (absolute URL or /path).
+  // Fragments ('#', '#foo'), empty, or relative → replace with next step URL.
+  // AI often emits href="#order" intending in-page scroll, which does nothing when the
+  // target id doesn't exist — CTAs must always advance the funnel.
+  if (nextUrl) {
+    for (const a of root.querySelectorAll('a[data-cta]')) {
+      const href = (a.getAttribute('href') || '').trim()
+      const isRealNav = /^(https?:|mailto:|tel:|\/)/i.test(href)
+      if (!isRealNav) a.setAttribute('href', nextUrl)
+    }
+  }
+
+  return root.toString()
+}
+
+/**
+ * Client-side helper: wire <button data-cta> outside a form to nextUrl,
+ * and ensure forms submit even if browser autofill stripped hidden values.
+ */
+function navigationScript(nextUrl: string): string {
+  if (!nextUrl) return ''
+  return `
+<script>
+(function(){
+  var NEXT = ${JSON.stringify(nextUrl)};
+  document.addEventListener('click', function(e){
+    var btn = e.target && e.target.closest && e.target.closest('button[data-cta]');
+    if (!btn) return;
+    if (btn.closest('form')) return;                   // submit button → let form handle
+    if (btn.getAttribute('type') === 'submit') return; // extra safety
+    e.preventDefault();
+    window.location.href = NEXT;
+  }, false);
+})();
+</script>`.trim()
+}
 
 function trackingScript(funnelId: string, stepId: string, portalBase: string): string {
   return `
@@ -52,30 +128,6 @@ function trackingScript(funnelId: string, stepId: string, portalBase: string): s
   }, true);
 })();
 </script>`.trim()
-}
-
-/**
- * Auto-wire CTA buttons to next step URL when step has no form.
- * If <a data-cta> has no href → set to next step URL.
- * If <button data-cta> outside form → wrap in <a href={next}> so it navigates.
- */
-function autoWireCtaLinks(html: string, funnelSlug: string, nextStepSlug?: string): string {
-  if (!nextStepSlug) return html
-  const nextUrl = `/f/${funnelSlug}/${nextStepSlug}`
-
-  // <a data-cta> without href — add href
-  html = html.replace(/<a\b([^>]*\bdata-cta\b[^>]*)>/gi, (m, attrs) => {
-    if (/\bhref\s*=/.test(attrs)) return m
-    return `<a${attrs} href="${nextUrl}">`
-  })
-
-  // <button data-cta> not inside <form> — wrap in <a>
-  // Approach: for each <button data-cta ...>...</button>, check if it's inside a <form>
-  // Simple regex approach won't nest-check properly. Do a naive pass: only wrap buttons that don't
-  // appear in the same nesting block as <form>. Skip for MVP if too complex — most AI CTAs use <a> anyway.
-  // Instead: leave <button data-cta> alone; user's form handling covers those.
-
-  return html
 }
 
 function notFoundHtml(msg: string): string {
@@ -139,11 +191,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const portalBase = process.env.CUSTOMER_PORTAL_URL || `${url.protocol}//${req.headers.host}`
   let html = step.html
-  // Auto-wire CTAs to next step if step has no form (CTA = navigation, not submit)
-  if (!step.has_form && nextStepSlug) {
-    html = autoWireCtaLinks(html, funnelSlug, nextStepSlug)
-  }
-  const inject = trackingScript(flow.id, step.id, portalBase)
+  // Guarantee navigation regardless of what AI generated (forms + CTAs)
+  html = wireFunnelNavigation(html, flow.id, step.id, funnelSlug, nextStepSlug)
+  const nextUrl = nextStepSlug ? `/f/${funnelSlug}/${nextStepSlug}` : ''
+  const inject = navigationScript(nextUrl) + '\n' + trackingScript(flow.id, step.id, portalBase)
   html = html.includes('</body>') ? html.replace('</body>', `${inject}\n</body>`) : html + inject
 
   // Auto-inject chat widget if this funnel has one configured

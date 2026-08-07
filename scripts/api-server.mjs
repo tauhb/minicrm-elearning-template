@@ -1705,11 +1705,19 @@ const server = http.createServer(async (req, nodeRes) => {
     return
   }
 
-  // Parse body
+  // Parse body — support JSON + application/x-www-form-urlencoded (funnel form posts)
   let body = ''
   for await (const chunk of req) body += chunk
   let parsedBody = {}
-  try { parsedBody = body ? JSON.parse(body) : {} } catch {}
+  const ctype = (req.headers['content-type'] || '').toLowerCase()
+  if (body) {
+    if (ctype.includes('application/x-www-form-urlencoded')) {
+      const p = new URLSearchParams(body)
+      p.forEach((v, k) => { parsedBody[k] = v })
+    } else {
+      try { parsedBody = JSON.parse(body) } catch {}
+    }
+  }
 
   const mockReq = { method: req.method, url: req.url, headers: req.headers, body: parsedBody }
 
