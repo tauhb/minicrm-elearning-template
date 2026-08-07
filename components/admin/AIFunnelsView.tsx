@@ -499,14 +499,31 @@ function FunnelDetailView({ id, onBack }: { id: string; onBack: () => void }) {
   const addStep = async (page_type: string, name: string, slug: string, has_form = false) => {
     if (!funnel) return
     const maxNum = funnel.steps.reduce((m, s) => Math.max(m, s.step_number), 0)
-    await api('/api/funnel-steps', {
-      method: 'POST',
-      body: JSON.stringify({
-        funnel_id: funnel.id, step_number: maxNum + 1,
-        slug: slug || `step-${maxNum + 1}`, name, page_type,
-        has_form, form_mode: has_form ? 'inline' : 'none',
-      }),
-    })
+
+    // Auto-defaults per page_type: reduce empty-field burden.
+    // User can always override in Cấu hình tab.
+    const payload: any = {
+      funnel_id: funnel.id, step_number: maxNum + 1,
+      slug: slug || `step-${maxNum + 1}`, name, page_type,
+      has_form, form_mode: has_form ? 'inline' : 'none',
+    }
+    if (page_type === 'order' && has_form) {
+      payload.form_fields = [
+        { name: 'name',  label: 'Họ và tên',     type: 'text',  required: true, placeholder: '' },
+        { name: 'email', label: 'Email',         type: 'email', required: true, placeholder: '' },
+        { name: 'phone', label: 'Số điện thoại', type: 'tel',   required: true, placeholder: '' },
+      ]
+    } else if (page_type === 'opt-in' && has_form) {
+      payload.form_fields = [
+        { name: 'name',  label: 'Họ và tên', type: 'text',  required: false, placeholder: '' },
+        { name: 'email', label: 'Email',     type: 'email', required: true,  placeholder: '' },
+      ]
+    }
+    if (page_type === 'upsell') {
+      const thankyou = funnel.steps.find(s => s.page_type === 'thank-you' || s.slug === 'thank-you')
+      if (thankyou) payload.upsell_config = { success_step_slug: thankyou.slug }
+    }
+    await api('/api/funnel-steps', { method: 'POST', body: JSON.stringify(payload) })
     setAddStepOpen(false)
     load()
   }
@@ -766,7 +783,7 @@ function AddStepModal({ onCancel, onAdd }: { onCancel: () => void; onAdd: (page_
 // STEP EDITOR
 // ═══════════════════════════════════════════════════════════════════════════
 function StepEditor({ step, funnel, onSaved }: { step: StepDetail; funnel: FunnelDetail; onSaved: () => void }) {
-  const [tab, setTab] = useState<'setting' | 'config' | 'outline'>('setting')
+  const [tab, setTab] = useState<'config' | 'setting' | 'outline'>('config')
   const [mode, setMode] = useState<'ai_draft' | 'ai_direct' | 'imported' | 'blank'>(step.content_source)
   const [formulas, setFormulas] = useState<Formula[]>([])
   const [formulaKey, setFormulaKey] = useState(step.copy_formula_key || 'pas')
@@ -827,7 +844,7 @@ function StepEditor({ step, funnel, onSaved }: { step: StepDetail; funnel: Funne
     setDirty(false)
     setLastSavedAt(null)
     setError(null)
-    setTab((step.copy_draft as any)?.blocks?.length ? 'outline' : 'setting')
+    setTab((step.copy_draft as any)?.blocks?.length ? 'outline' : 'config')
   }, [step.id])
 
   // Track whether user has unsaved outline changes
@@ -1010,6 +1027,24 @@ function StepEditor({ step, funnel, onSaved }: { step: StepDetail; funnel: Funne
   const currentFormula = formulas.find(f => f.key === (step.copy_formula_key || formulaKey))
   const hasDraft = copyDraft.blocks?.length > 0
 
+  // Compute which config fields matter for THIS step's page_type and which are set.
+  // Powers both the summary card (Cấu hình tab) and the warning banner (Nội dung tab).
+  const configChecks = (() => {
+    const items: Array<{ label: string; ok: boolean; critical: boolean }> = []
+    items.push({ label: 'SEO metadata', ok: !!(pageTitle.trim() || pageDescription.trim()), critical: false })
+    if (step.page_type === 'order' || step.page_type === 'upsell') {
+      items.push({ label: `Sản phẩm ${step.page_type === 'upsell' ? 'upsell' : 'gán'}`, ok: !!assignedProductId, critical: true })
+    }
+    if (hasForm) {
+      items.push({ label: `Form fields (${formFields.length})`, ok: formFields.length > 0, critical: true })
+    }
+    if (step.page_type === 'upsell') {
+      items.push({ label: 'Success step (sau upsell)', ok: !!upsellSuccessSlug, critical: false })
+    }
+    return items
+  })()
+  const missingCritical = configChecks.filter(c => c.critical && !c.ok)
+
   return (
     <div className="grid grid-cols-12 gap-4">
       {/* LEFT: Editor panel with 2 tabs */}
@@ -1032,8 +1067,8 @@ function StepEditor({ step, funnel, onSaved }: { step: StepDetail; funnel: Funne
         {/* TABS */}
         <div className="flex gap-1 mb-3 border-b border-neutral-800">
           {([
-            { key: 'setting', label: 'Nội dung', icon: Wand2 },
             { key: 'config',  label: 'Cấu hình', icon: SlidersHorizontal },
+            { key: 'setting', label: 'Nội dung', icon: Wand2 },
             { key: 'outline', label: `Copy outline${hasDraft ? ` (${copyDraft.blocks.length})` : ''}`, icon: Layers },
           ] as const).map(t => (
             <button key={t.key} onClick={() => setTab(t.key)}
@@ -1057,6 +1092,25 @@ function StepEditor({ step, funnel, onSaved }: { step: StepDetail; funnel: Funne
         {/* ═════════ TAB 1: SETTING STEP ═════════ */}
         {tab === 'setting' && (
           <div className="space-y-4 overflow-y-auto pr-2 flex-1">
+            {/* Warning banner: critical config missing → AI will write generic copy */}
+            {missingCritical.length > 0 && (
+              <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg flex items-start gap-3">
+                <div className="text-amber-400 mt-0.5">⚠</div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm text-amber-300 font-medium mb-1">
+                    Cấu hình chưa đủ — AI sẽ viết chung chung
+                  </p>
+                  <p className="text-xs text-amber-200/80 mb-2">
+                    Thiếu: <span className="font-mono">{missingCritical.map(c => c.label).join(', ')}</span>.
+                    Không có product/form fields, AI không biết tên sản phẩm, giá, hoặc field name → CTA & form sẽ generic.
+                  </p>
+                  <button onClick={() => setTab('config')}
+                    className="text-xs px-2 py-1 bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 rounded inline-flex items-center gap-1">
+                    <SlidersHorizontal className="w-3 h-3" /> Sang Cấu hình →
+                  </button>
+                </div>
+              </div>
+            )}
             {/* Mode picker */}
             <div>
               <label className="text-xs text-neutral-500 uppercase tracking-wider block mb-2">Content source</label>
@@ -1150,6 +1204,36 @@ function StepEditor({ step, funnel, onSaved }: { step: StepDetail; funnel: Funne
         {/* ═════════ TAB 2: CẤU HÌNH — SEO + Sản phẩm + Form ═════════ */}
         {tab === 'config' && (
           <div className="space-y-5 overflow-y-auto pr-2 flex-1">
+            {/* Config summary card */}
+            <div className="p-3 border rounded-lg" style={{
+              borderColor: missingCritical.length ? 'rgba(245, 158, 11, 0.3)' : 'rgba(34, 197, 94, 0.3)',
+              backgroundColor: missingCritical.length ? 'rgba(245, 158, 11, 0.05)' : 'rgba(34, 197, 94, 0.05)',
+            }}>
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs uppercase tracking-wider text-neutral-400">Trạng thái setup "{step.name}"</span>
+                <span className={`text-xs ${missingCritical.length ? 'text-amber-400' : 'text-green-400'}`}>
+                  {missingCritical.length ? `Thiếu ${missingCritical.length}` : 'Đủ'}
+                </span>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {configChecks.map((c, i) => (
+                  <span key={i} className={`text-xs px-2 py-1 rounded border ${
+                    c.ok ? 'border-green-500/30 text-green-400 bg-green-500/5'
+                         : c.critical ? 'border-amber-500/30 text-amber-400 bg-amber-500/5'
+                                       : 'border-neutral-700 text-neutral-500'
+                  }`}>
+                    {c.ok ? '✓' : (c.critical ? '⚠' : '○')} {c.label}
+                  </span>
+                ))}
+              </div>
+              {!missingCritical.length && (
+                <button onClick={() => setTab('setting')}
+                  className="mt-2 text-xs px-2 py-1 bg-green-500/20 hover:bg-green-500/30 text-green-300 rounded inline-flex items-center gap-1">
+                  <Wand2 className="w-3 h-3" /> Sang Nội dung để generate AI →
+                </button>
+              )}
+            </div>
+
             {/* Page metadata (SEO) */}
             <div>
               <label className="text-xs text-neutral-500 uppercase tracking-wider block mb-2">Page metadata (SEO)</label>

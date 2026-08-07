@@ -7,6 +7,7 @@
 
 import { createClient } from '@supabase/supabase-js'
 import { getBlockCatalogPrompt } from './funnel-blocks'
+import { resolveStepContext, renderContextBlock } from './funnel-context'
 
 const DRAFT_RUNTIME_RULES = `
 # RUNTIME OUTPUT RULES (BẮT BUỘC)
@@ -169,12 +170,16 @@ async function loadFormulaPrompt(key: string): Promise<string> {
 
 // ─── PHASE 1: Draft (input → structured JSON) ─────────────────────────────────
 export async function composeDraftPrompts(input: ComposeDraftInput): Promise<{ system: string; user: string }> {
-  const base = await resolveBasePrompt(input.funnelId)
-  const formulaPrompt = await loadFormulaPrompt(input.formulaKey)
-  const catalog = getBlockCatalogPrompt()
+  const [base, formulaPrompt, catalog, ctx] = await Promise.all([
+    resolveBasePrompt(input.funnelId),
+    loadFormulaPrompt(input.formulaKey),
+    Promise.resolve(getBlockCatalogPrompt()),
+    resolveStepContext(input.stepId),
+  ])
 
   const parts: string[] = []
   if (base.prompt) parts.push(base.prompt)
+  if (ctx) parts.push('---\n\n' + renderContextBlock(ctx))
   if (formulaPrompt) parts.push('---\n\n# COPY FORMULA\n\n' + formulaPrompt)
   parts.push('---\n\n' + catalog)
   parts.push('---\n\n' + DRAFT_RUNTIME_RULES)
@@ -182,19 +187,12 @@ export async function composeDraftPrompts(input: ComposeDraftInput): Promise<{ s
   const system = parts.join('\n\n')
 
   const userLines: string[] = [
-    `# Step Context`,
-    `- Step name: ${input.stepMeta.name}`,
-    `- Page type: ${input.stepMeta.page_type}`,
-    `- Has form: ${input.stepMeta.has_form ? 'yes' : 'no'}`,
-    ``,
-    `# Shared Funnel Context`,
-    ...Object.entries(input.sharedContext).map(([k, v]) => `- ${k}: ${typeof v === 'string' ? v : JSON.stringify(v)}`),
-    ``,
     `# User Raw Input for this step`,
-    input.rawInput || '(user chưa nhập, dùng shared context làm chính)',
+    input.rawInput || '(user chưa nhập, dùng FUNNEL CONTEXT + shared context làm chính)',
     ``,
     `# Task`,
-    `Sinh copy_draft JSON theo formula ở trên + block catalog. Chọn thứ tự và số lượng blocks phù hợp với page_type "${input.stepMeta.page_type}".`,
+    `Sinh copy_draft JSON theo formula ở trên + block catalog. Số lượng blocks phù hợp page_type "${input.stepMeta.page_type}".`,
+    `BẮT BUỘC dùng thông tin sản phẩm/giá/next-step từ FUNNEL CONTEXT ở system prompt — không viết chung chung.`,
   ]
 
   return { system, user: userLines.join('\n') }
@@ -207,6 +205,7 @@ export interface BlockExtras {
 }
 export interface ComposeBlockRenderInput {
   funnelId: string
+  stepId?: string                // NEW: enables FUNNEL CONTEXT injection
   block: { kind: string; content: any; extras?: BlockExtras }
   style: StyleInstructions
   stepMeta: { name: string; page_type: string; has_form: boolean; form_fields?: any[] }
@@ -214,10 +213,14 @@ export interface ComposeBlockRenderInput {
 }
 
 export async function composeBlockRenderPrompts(input: ComposeBlockRenderInput): Promise<{ system: string; user: string }> {
-  const base = await resolveBasePrompt(input.funnelId)
+  const [base, ctx] = await Promise.all([
+    resolveBasePrompt(input.funnelId),
+    input.stepId ? resolveStepContext(input.stepId) : Promise.resolve(null),
+  ])
 
   const parts: string[] = []
   if (base.prompt) parts.push(base.prompt)
+  if (ctx) parts.push('---\n\n' + renderContextBlock(ctx))
   parts.push('---\n\n' + styleInstructionsBlock(input.style))
   parts.push('---\n\n' + BLOCK_TO_HTML_GUIDE)
   if (input.renderInstructions && input.renderInstructions.trim()) {

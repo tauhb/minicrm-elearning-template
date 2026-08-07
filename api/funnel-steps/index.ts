@@ -221,7 +221,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
         try {
           const { system, user } = await composeBlockRenderPrompts({
-            funnelId: step.funnel_id, block, style, stepMeta, renderInstructions,
+            funnelId: step.funnel_id, stepId: step.id, block, style, stepMeta, renderInstructions,
           })
           const r = await runCompletion({
             provider: 'openai-codex', model: body.model,
@@ -317,7 +317,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           sectionHtml = `<section class="py-16 md:py-24" data-block-index="${blockIndex}" data-block-kind="${block.kind}"${block.id ? ` data-block-id="${block.id}"` : ''}>${block.content.html}</section>`
         } else {
           const { system, user } = await composeBlockRenderPrompts({
-            funnelId: step.funnel_id, block, style, stepMeta, renderInstructions,
+            funnelId: step.funnel_id, stepId: step.id, block, style, stepMeta, renderInstructions,
           })
           const r = await runCompletion({ provider: 'openai-codex', model: body.model, systemPrompt: system, userPrompt: user })
           usage = r.usage
