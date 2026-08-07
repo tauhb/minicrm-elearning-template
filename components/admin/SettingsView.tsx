@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { Copy, Check, Webhook, Mail, Zap, Info, Sliders, ExternalLink, KeyRound, Palette, Activity, Sparkles, Layers, PenLine } from 'lucide-react'
+import { Copy, Check, Webhook, Mail, Zap, Info, Sliders, ExternalLink, KeyRound, Palette, Activity, Sparkles, Layers, PenLine, Users } from 'lucide-react'
 import type { PortalTheme } from '../../types'
 import { supabase } from '../../services/supabase'
 import { useConfig } from '../../contexts/ConfigContext'
@@ -7,8 +7,9 @@ import AISettingsView from './AISettingsView'
 import FunnelTypesView from './FunnelTypesView'
 import CopyFormulasView from './CopyFormulasView'
 import HealthCheckTab from './HealthCheckTab'
+import TeamView from './TeamView'
 
-type Tab = 'webhook' | 'email' | 'ai' | 'funnel-types' | 'copy-formulas' | 'health' | 'general'
+type Tab = 'team' | 'webhook' | 'email' | 'ai' | 'funnel-types' | 'copy-formulas' | 'health' | 'general'
 
 const THEMES: Array<{
   id: PortalTheme; name: string
@@ -53,7 +54,7 @@ const THEMES: Array<{
   },
 ]
 
-const VALID_TABS: Tab[] = ['webhook', 'email', 'ai', 'funnel-types', 'copy-formulas', 'health', 'general']
+const VALID_TABS: Tab[] = ['team', 'webhook', 'email', 'ai', 'funnel-types', 'copy-formulas', 'health', 'general']
 
 const readTabFromHash = (): Tab | null => {
   if (typeof window === 'undefined') return null
@@ -63,7 +64,7 @@ const readTabFromHash = (): Tab | null => {
 
 const SettingsView: React.FC = () => {
   const { settings, updateSettings } = useConfig()
-  const [activeTab, setActiveTab] = useState<Tab>(() => readTabFromHash() || 'webhook')
+  const [activeTab, setActiveTab] = useState<Tab>(() => readTabFromHash() || 'team')
 
   // Sync with URL hash so external links (e.g. onboarding checklist) can deep-link
   useEffect(() => {
@@ -238,6 +239,7 @@ const SettingsView: React.FC = () => {
       {/* Tabs */}
       <div className="flex gap-1 mb-6 border-b border-gray-800">
         {([
+          { key: 'team', label: 'Đội ngũ', icon: Users },
           { key: 'webhook', label: 'Webhook & Delivery', icon: Webhook },
           { key: 'email', label: 'Email', icon: Mail },
           { key: 'ai', label: 'AI Providers', icon: Sparkles },
@@ -264,6 +266,8 @@ const SettingsView: React.FC = () => {
           </button>
         ))}
       </div>
+
+      {activeTab === 'team' && <TeamView />}
 
       {activeTab === 'webhook' && (
         <div className="space-y-6">
