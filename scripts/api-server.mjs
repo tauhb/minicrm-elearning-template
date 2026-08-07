@@ -966,14 +966,27 @@ async function loadCredForRuntime(provider) {
   return { accessToken, baseUrl: cred.base_url || CODEX_BASE_URL }
 }
 
+function _codexHeaders(accessToken) {
+  const h = {
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${accessToken}`,
+    'OpenAI-Beta': 'responses=v1',
+    'User-Agent': 'codex_cli_rs/0.0.0 (customer-portal-giftbox)',
+    'originator': 'codex_cli_rs',
+  }
+  const acctId = extractAccountIdFromJwt(accessToken)
+  if (acctId) h['ChatGPT-Account-ID'] = acctId
+  return h
+}
+
 async function handleAIModels(req, res) {
   const user = await assertAdmin(req, res); if (!user) return
   const url = new URL(req.url, 'http://localhost')
   const provider = url.searchParams.get('provider') || 'openai-codex'
   try {
     const cred = await loadCredForRuntime(provider)
-    const resp = await fetch(`${cred.baseUrl}/models`, {
-      headers: { 'Authorization': `Bearer ${cred.accessToken}`, 'OpenAI-Beta': 'responses=v1' },
+    const resp = await fetch(`${cred.baseUrl}/models?client_version=0.0.0`, {
+      headers: _codexHeaders(cred.accessToken),
     })
     if (!resp.ok) return res.json({ provider, models: ['gpt-5.6-sol', 'gpt-5.5', 'gpt-5.1', 'gpt-4o'] })
     const data = await resp.json()
@@ -988,13 +1001,19 @@ async function handleAIGenerate(req, res) {
   if (!userPrompt) return res.status(400).json({ error: 'userPrompt required' })
   try {
     const cred = await loadCredForRuntime(provider)
-    const messages = []
-    if (systemPrompt) messages.push({ role: 'system', content: systemPrompt })
-    messages.push({ role: 'user', content: userPrompt })
+    const body = {
+      model,
+      input: [{ role: 'user', content: [{ type: 'input_text', text: userPrompt }] }],
+      max_output_tokens: maxTokens,
+      temperature,
+      store: false,
+      stream: false,
+    }
+    if (systemPrompt) body.instructions = systemPrompt
     const resp = await fetch(`${cred.baseUrl}/responses`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${cred.accessToken}`, 'OpenAI-Beta': 'responses=v1' },
-      body: JSON.stringify({ model, input: messages, max_output_tokens: maxTokens, temperature, stream: false }),
+      headers: _codexHeaders(cred.accessToken),
+      body: JSON.stringify(body),
     })
     if (!resp.ok) {
       const text = await resp.text().catch(() => '')

@@ -97,7 +97,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         style_preset: body.style_preset || {},
         shared_context: body.shared_context || {},
         payment_mode: body.payment_mode || 'collect_only',
-        auto_nurture: body.auto_nurture !== false,
+        tags_to_apply: body.tags_to_apply || [],
         custom_prompt: body.custom_prompt || null,
         custom_domain: body.custom_domain || null,
         created_by: user.id,
@@ -114,6 +114,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if (dupe) return res.status(409).json({ error: `Slug "${slug}" đã tồn tại` })
         const { data, error } = await admin.from('funnel_flows').insert(payload).select().single()
         if (error) return res.status(500).json({ error: error.message })
+
+        // Auto-suggest steps from type's suggested_steps (transparent to user)
+        if (body.auto_suggest !== false && data) {
+          try {
+            const { data: type } = await admin.from('funnel_types')
+              .select('suggested_steps').eq('key', data.type_key).maybeSingle()
+            const suggested = ((type?.suggested_steps || []) as any[])
+            if (suggested.length) {
+              const rows = suggested.map((s: any) => ({
+                funnel_id: data.id,
+                step_number: s.step_number, slug: s.slug, name: s.name,
+                page_type: s.page_type,
+                has_form: !!s.has_form,
+                form_mode: s.form_mode || (s.has_form ? 'inline' : 'none'),
+                form_fields: s.form_fields || [],
+                form_success_step_slug: s.form_success_step_slug || null,
+                content_source: 'ai_draft', copy_input: {}, html: null,
+              }))
+              await admin.from('funnel_steps').insert(rows)
+            }
+          } catch (e: any) {
+            console.warn('[flow create] auto-suggest steps failed:', e.message)
+            // Non-blocking — flow still created
+          }
+        }
         return res.json(data)
       }
     }

@@ -79,6 +79,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // ───── POST ─────
     if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
 
+    // Action: REORDER — set step_number for a list of step ids in given order
+    if (action === 'reorder' && funnelId) {
+      const body = req.body || {}
+      const orderedIds: string[] = body.ordered_ids || []
+      if (!Array.isArray(orderedIds) || orderedIds.length === 0) return res.status(400).json({ error: 'ordered_ids required' })
+
+      // 2-phase update to avoid UNIQUE(funnel_id, step_number) violations:
+      // Phase 1: set step_number = -1000 - index for all target rows (guaranteed unique + non-conflicting)
+      // Phase 2: set step_number = index + 1 to final values
+      for (let i = 0; i < orderedIds.length; i++) {
+        await admin.from('funnel_steps').update({ step_number: -1000 - i }).eq('id', orderedIds[i]).eq('funnel_id', funnelId)
+      }
+      for (let i = 0; i < orderedIds.length; i++) {
+        await admin.from('funnel_steps').update({ step_number: i + 1, updated_at: new Date().toISOString() }).eq('id', orderedIds[i]).eq('funnel_id', funnelId)
+      }
+      const { data } = await admin.from('funnel_steps').select('*').eq('funnel_id', funnelId).order('step_number')
+      return res.json({ steps: data || [] })
+    }
+
     // Action: SUGGEST — auto-create steps from type.suggested_steps
     if (action === 'suggest' && funnelId) {
       const { data: flow } = await admin.from('funnel_flows').select('type_key').eq('id', funnelId).single()

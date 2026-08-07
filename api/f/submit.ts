@@ -49,14 +49,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   // Verify funnel is published
   const { data: flow } = await admin.from('funnel_flows')
-    .select('id, slug, status, auto_nurture').eq('id', funnel_id).maybeSingle()
+    .select('id, slug, status, tags_to_apply').eq('id', funnel_id).maybeSingle()
   if (!flow || flow.status !== 'published') {
     return res.status(404).json({ error: 'Funnel not published' })
   }
 
   // Verify step + get success redirect
   const { data: step } = await admin.from('funnel_steps')
-    .select('id, form_success_step_slug, form_success_url, form_fields').eq('id', step_id).maybeSingle()
+    .select('id, form_success_step_slug, form_success_url, form_fields, additional_tags').eq('id', step_id).maybeSingle()
   if (!step) return res.status(404).json({ error: 'Step not found' })
 
   // Extract field values (skip system fields)
@@ -97,23 +97,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(500).json({ error: subErr.message })
   }
 
-  // Auto-sync to leads if email present
+  // Auto-sync to leads if email present + merge tags
   if (fieldData.email) {
     try {
+      const flowTags: string[] = flow.tags_to_apply || []
+      const stepTags: string[] = step.additional_tags || []
+      const newTags = [...new Set([...flowTags, ...stepTags])].filter(Boolean)
+
       // Check existing lead by email
       const { data: existingLead } = await admin.from('leads')
-        .select('id').eq('email', fieldData.email).maybeSingle()
+        .select('id, tags').eq('email', fieldData.email).maybeSingle()
 
       let leadId: string
       if (existingLead) {
         leadId = existingLead.id
-        // Update contact info if new
-        const patch: any = {}
+        // Merge tags with existing (dedup)
+        const mergedTags = [...new Set([...(existingLead.tags || []), ...newTags])]
+        const patch: any = { tags: mergedTags }
         if (fieldData.name && fieldData.name.trim()) patch.name = fieldData.name
         if (fieldData.phone) patch.phone = fieldData.phone
-        if (Object.keys(patch).length) {
-          await admin.from('leads').update(patch).eq('id', leadId)
-        }
+        await admin.from('leads').update(patch).eq('id', leadId)
       } else {
         const { data: newLead } = await admin.from('leads').insert({
           email: fieldData.email,
@@ -121,6 +124,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           phone: fieldData.phone || null,
           source: `funnel:${flow.slug}/${step_id}`,
           utm_source, utm_medium, utm_campaign,
+          tags: newTags,
         }).select('id').single()
         leadId = newLead?.id
       }
@@ -130,8 +134,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         await admin.from('funnel_form_submissions').update({ synced_lead_id: leadId }).eq('id', submission.id)
       }
 
-      // TODO: if flow.auto_nurture && has EMAIL_PROVIDER — trigger lead nurture
-      // Skipping in this MVP — hook here later.
+      // NOTE: Auto-nurture email removed. Replaced by tags system.
+      // Future: Workflow feature will trigger actions (emails, sequences) based on tag rules.
     } catch (e: any) {
       console.error('[funnel-submit] lead sync', e.message)
       // Don't fail submission if lead sync fails

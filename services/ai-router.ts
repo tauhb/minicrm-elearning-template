@@ -103,28 +103,62 @@ async function loadCred(provider: ProviderId): Promise<LoadedCred> {
 
 // ─── Provider: openai-codex ──────────────────────────────────────────────────
 
+/**
+ * Extract ChatGPT-Account-ID from OAuth JWT claims.
+ * Required for Cloudflare mitigation on chatgpt.com/backend-api/codex.
+ */
+function extractAccountIdFromJwt(accessToken: string): string | null {
+  try {
+    const parts = accessToken.split('.')
+    if (parts.length < 2) return null
+    const b64 = parts[1] + '='.repeat((4 - parts[1].length % 4) % 4)
+    const claims = JSON.parse(Buffer.from(b64, 'base64url').toString('utf8'))
+    return claims['https://api.openai.com/auth']?.chatgpt_account_id || null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Build Codex-specific headers (Cloudflare mitigation from Hermes pattern).
+ */
+function codexHeaders(accessToken: string): Record<string, string> {
+  const h: Record<string, string> = {
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${accessToken}`,
+    'OpenAI-Beta': 'responses=v1',
+    'User-Agent': 'codex_cli_rs/0.0.0 (customer-portal-giftbox)',
+    'originator': 'codex_cli_rs',
+  }
+  const acctId = extractAccountIdFromJwt(accessToken)
+  if (acctId) h['ChatGPT-Account-ID'] = acctId
+  return h
+}
+
 async function callOpenAICodex(input: CompletionInput, cred: LoadedCred): Promise<CompletionResult> {
   const model = input.model || 'gpt-5.6-sol'
 
-  const messages = []
-  if (input.systemPrompt) messages.push({ role: 'system', content: input.systemPrompt })
-  messages.push({ role: 'user', content: input.userPrompt })
+  // Codex Responses API format:
+  //   instructions: system prompt
+  //   input: [{ role, content: [{type: 'input_text', text: '...'}] }]
+  //   store: false (Codex contract requires this)
+  const body: any = {
+    model,
+    input: [{
+      role: 'user',
+      content: [{ type: 'input_text', text: input.userPrompt }],
+    }],
+    max_output_tokens: input.maxTokens || 4096,
+    store: false,
+    stream: false,
+  }
+  if (input.systemPrompt) body.instructions = input.systemPrompt
+  if (typeof input.temperature === 'number') body.temperature = input.temperature
 
-  // Codex uses /responses endpoint (Responses API)
   const res = await fetch(`${cred.baseUrl}/responses`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${cred.accessToken}`,
-      'OpenAI-Beta': 'responses=v1',
-    },
-    body: JSON.stringify({
-      model,
-      input: messages,
-      max_output_tokens: input.maxTokens || 4096,
-      temperature: input.temperature ?? 0.7,
-      stream: false,
-    }),
+    headers: codexHeaders(cred.accessToken),
+    body: JSON.stringify(body),
   })
 
   if (!res.ok) {
@@ -167,11 +201,8 @@ export async function listModels(provider: ProviderId): Promise<string[]> {
   if (provider === 'openai-codex') {
     // Codex /models endpoint returns available models for this account
     try {
-      const res = await fetch(`${cred.baseUrl}/models`, {
-        headers: {
-          'Authorization': `Bearer ${cred.accessToken}`,
-          'OpenAI-Beta': 'responses=v1',
-        },
+      const res = await fetch(`${cred.baseUrl}/models?client_version=0.0.0`, {
+        headers: codexHeaders(cred.accessToken),
       })
       if (!res.ok) {
         // Fallback to known default list

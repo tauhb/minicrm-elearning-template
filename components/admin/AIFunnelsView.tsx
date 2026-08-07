@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react'
-import { Sparkles, Plus, Loader2, Eye, Edit2, Trash2, ExternalLink, Send, ChevronLeft, Layers, Wand2, FileCode2, X, Check, ArrowRight, Copy, Save, Zap } from 'lucide-react'
+import { Sparkles, Plus, Loader2, Eye, Edit2, Trash2, ExternalLink, Send, ChevronLeft, Layers, Wand2, FileCode2, X, Check, ArrowRight, Copy, Save, Zap, ArrowUp, ArrowDown, Settings2, Tag } from 'lucide-react'
 import { supabase } from '../../services/supabase'
 import { StylePicker, StylePreset } from './funnels/StylePicker'
 import { ContentDraftEditor, CopyDraft } from './funnels/ContentDraftEditor'
@@ -14,7 +14,7 @@ interface FunnelDetail extends FunnelListItem {
   shared_context: Record<string, any>
   custom_prompt: string | null
   payment_mode: string
-  auto_nurture: boolean
+  tags_to_apply: string[]
   custom_domain: string | null
   steps: StepDetail[]
 }
@@ -172,9 +172,10 @@ function FunnelWizard({ onCancel, onCreated }: { onCancel: () => void; onCreated
   const [form, setForm] = useState({
     name: '', slug: '', type_key: '',
     payment_mode: 'collect_only',
-    auto_nurture: true,
+    tags_to_apply: [] as string[],
+    tag_input: '',
     style_preset: { vibe: 'minimal', fontPair: 'Inter+Playfair Display', layout: 'balanced', density: 'balanced', brandColor: '#B6FF00' } as StylePreset,
-    shared_context: '',   // free text
+    shared_context: '',
     use_custom_prompt: false,
     custom_prompt: '',
   })
@@ -198,8 +199,9 @@ function FunnelWizard({ onCancel, onCreated }: { onCancel: () => void; onCreated
         style_preset: form.style_preset,
         shared_context: parseSharedContext(form.shared_context),
         payment_mode: form.payment_mode,
-        auto_nurture: form.auto_nurture,
+        tags_to_apply: form.tags_to_apply,
         custom_prompt: form.use_custom_prompt ? form.custom_prompt : null,
+        auto_suggest: true,   // Backend auto-creates steps from type
       }
       const created = await api<{ id: string }>('/api/funnel-flows', { method: 'POST', body: JSON.stringify(body) })
       onCreated(created.id)
@@ -264,11 +266,29 @@ function FunnelWizard({ onCancel, onCreated }: { onCancel: () => void; onCreated
               </select>
             </div>
             <div>
-              <label className="text-xs text-neutral-500 uppercase tracking-wider block mb-1">Auto-nurture emails</label>
-              <label className="flex items-center gap-2 mt-2">
-                <input type="checkbox" checked={form.auto_nurture} onChange={e => setF('auto_nurture', e.target.checked)} />
-                <span className="text-sm">Gửi email nurture khi có lead mới</span>
+              <label className="text-xs text-neutral-500 uppercase tracking-wider block mb-1 flex items-center gap-1">
+                <Tag className="w-3 h-3" /> Tags gắn cho leads
               </label>
+              <div className="flex flex-wrap gap-1 mb-1">
+                {form.tags_to_apply.map((t, i) => (
+                  <span key={i} className="inline-flex items-center gap-1 px-2 py-0.5 bg-neutral-800 text-xs rounded border border-neutral-700">
+                    {t}
+                    <button onClick={() => setF('tags_to_apply', form.tags_to_apply.filter((_, j) => j !== i))} className="text-neutral-500 hover:text-red-400"><X className="w-3 h-3" /></button>
+                  </span>
+                ))}
+              </div>
+              <input value={form.tag_input} onChange={e => setF('tag_input', e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter' || e.key === ',') {
+                    e.preventDefault()
+                    const t = form.tag_input.trim().replace(/,$/, '')
+                    if (t && !form.tags_to_apply.includes(t)) setF('tags_to_apply', [...form.tags_to_apply, t])
+                    setF('tag_input', '')
+                  }
+                }}
+                className="w-full px-2 py-1.5 bg-neutral-900 border border-neutral-800 rounded text-xs"
+                placeholder="Nhấn Enter để thêm tag (VD: khoa-ai, funnel-2026)" />
+              <p className="text-[10px] text-neutral-500 mt-1">Sau này Workflow feature dùng tags để tự động actions (email, sequence, notify).</p>
             </div>
           </div>
           <div className="flex justify-between pt-4">
@@ -387,6 +407,71 @@ function FunnelDetailView({ id, onBack }: { id: string; onBack: () => void }) {
     } catch (e: any) { alert(e.message) }
   }
 
+  const [stepMenuOpen, setStepMenuOpen] = useState<string | null>(null)   // step id
+  const [addStepOpen, setAddStepOpen] = useState(false)
+
+  const moveStep = async (stepId: string, dir: -1 | 1) => {
+    if (!funnel) return
+    const ordered = [...funnel.steps].sort((a, b) => a.step_number - b.step_number)
+    const idx = ordered.findIndex(s => s.id === stepId)
+    if (idx < 0) return
+    const j = idx + dir
+    if (j < 0 || j >= ordered.length) return
+    ;[ordered[idx], ordered[j]] = [ordered[j], ordered[idx]]
+    try {
+      await api(`/api/funnel-steps?action=reorder&funnel_id=${funnel.id}`, {
+        method: 'POST', body: JSON.stringify({ ordered_ids: ordered.map(s => s.id) }),
+      })
+      load()
+    } catch (e: any) { alert(e.message) }
+  }
+
+  const deleteStep = async (stepId: string, name: string) => {
+    if (!confirm(`Xoá step "${name}"?`)) return
+    await api(`/api/funnel-steps?id=${stepId}`, { method: 'DELETE' })
+    if (selectedStepId === stepId) setSelectedStepId(null)
+    load()
+  }
+
+  const renameStep = async (stepId: string) => {
+    const step = funnel?.steps.find(s => s.id === stepId)
+    if (!step) return
+    const newName = prompt('Tên mới:', step.name)
+    if (!newName || newName === step.name) return
+    await api('/api/funnel-steps', {
+      method: 'POST',
+      body: JSON.stringify({ id: stepId, funnel_id: step.funnel_id, name: newName, slug: step.slug, page_type: step.page_type }),
+    })
+    load()
+  }
+
+  const changeStepSlug = async (stepId: string) => {
+    const step = funnel?.steps.find(s => s.id === stepId)
+    if (!step) return
+    const newSlug = prompt('Slug mới (URL):', step.slug)
+    if (!newSlug || newSlug === step.slug) return
+    await api('/api/funnel-steps', {
+      method: 'POST',
+      body: JSON.stringify({ id: stepId, funnel_id: step.funnel_id, slug: newSlug, name: step.name, page_type: step.page_type }),
+    })
+    load()
+  }
+
+  const addStep = async (page_type: string, name: string, slug: string, has_form = false) => {
+    if (!funnel) return
+    const maxNum = funnel.steps.reduce((m, s) => Math.max(m, s.step_number), 0)
+    await api('/api/funnel-steps', {
+      method: 'POST',
+      body: JSON.stringify({
+        funnel_id: funnel.id, step_number: maxNum + 1,
+        slug: slug || `step-${maxNum + 1}`, name, page_type,
+        has_form, form_mode: has_form ? 'inline' : 'none',
+      }),
+    })
+    setAddStepOpen(false)
+    load()
+  }
+
   const publish = async () => {
     if (!funnel) return
     await api(`/api/funnel-flows?action=publish&id=${funnel.id}`, { method: 'POST' })
@@ -447,24 +532,123 @@ function FunnelDetailView({ id, onBack }: { id: string; onBack: () => void }) {
           <div className="flex items-center gap-2 mb-4 pb-3 border-b border-neutral-800 overflow-x-auto">
             {funnel.steps.map((s, i) => (
               <React.Fragment key={s.id}>
-                <button onClick={() => setSelectedStepId(s.id)}
-                  className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-sm whitespace-nowrap transition ${
-                    selectedStepId === s.id ? '' : 'border-neutral-800 hover:border-neutral-700'
-                  }`}
-                  style={selectedStepId === s.id ? { borderColor: 'var(--color-mission-accent)', background: 'var(--color-mission-accent)10' } : undefined}>
-                  <span className="w-5 h-5 rounded-full bg-neutral-800 text-xs flex items-center justify-center">{s.step_number}</span>
-                  <span>{s.name}</span>
-                  {s.html && <Check className="w-3 h-3 text-green-400" />}
-                </button>
+                <div className="relative flex items-center gap-1">
+                  <button onClick={() => setSelectedStepId(s.id)}
+                    className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-sm whitespace-nowrap transition ${
+                      selectedStepId === s.id ? '' : 'border-neutral-800 hover:border-neutral-700'
+                    }`}
+                    style={selectedStepId === s.id ? { borderColor: 'var(--color-mission-accent)', background: 'var(--color-mission-accent)10' } : undefined}>
+                    <span className="w-5 h-5 rounded-full bg-neutral-800 text-xs flex items-center justify-center">{s.step_number}</span>
+                    <span>{s.name}</span>
+                    {s.html && <Check className="w-3 h-3 text-green-400" />}
+                  </button>
+                  <button onClick={() => setStepMenuOpen(stepMenuOpen === s.id ? null : s.id)}
+                    className="p-1.5 hover:bg-neutral-800 rounded" title="Actions">
+                    <Settings2 className="w-3.5 h-3.5 text-neutral-500" />
+                  </button>
+                  {stepMenuOpen === s.id && (
+                    <div className="absolute top-full right-0 mt-1 z-10 bg-neutral-900 border border-neutral-800 rounded-lg shadow-xl py-1 min-w-[180px]">
+                      <button onClick={() => { renameStep(s.id); setStepMenuOpen(null) }} className="w-full text-left px-3 py-1.5 text-xs hover:bg-neutral-800 flex items-center gap-2">
+                        <Edit2 className="w-3 h-3" /> Rename
+                      </button>
+                      <button onClick={() => { changeStepSlug(s.id); setStepMenuOpen(null) }} className="w-full text-left px-3 py-1.5 text-xs hover:bg-neutral-800 flex items-center gap-2">
+                        <ExternalLink className="w-3 h-3" /> Change slug
+                      </button>
+                      <div className="border-t border-neutral-800 my-1" />
+                      <button onClick={() => { moveStep(s.id, -1); setStepMenuOpen(null) }} disabled={i === 0} className="w-full text-left px-3 py-1.5 text-xs hover:bg-neutral-800 flex items-center gap-2 disabled:opacity-30">
+                        <ArrowUp className="w-3 h-3" /> Move up
+                      </button>
+                      <button onClick={() => { moveStep(s.id, 1); setStepMenuOpen(null) }} disabled={i === funnel.steps.length - 1} className="w-full text-left px-3 py-1.5 text-xs hover:bg-neutral-800 flex items-center gap-2 disabled:opacity-30">
+                        <ArrowDown className="w-3 h-3" /> Move down
+                      </button>
+                      <div className="border-t border-neutral-800 my-1" />
+                      <button onClick={() => { deleteStep(s.id, s.name); setStepMenuOpen(null) }} className="w-full text-left px-3 py-1.5 text-xs hover:bg-neutral-800 text-red-400 flex items-center gap-2">
+                        <Trash2 className="w-3 h-3" /> Delete step
+                      </button>
+                    </div>
+                  )}
+                </div>
                 {i < funnel.steps.length - 1 && <ArrowRight className="w-3 h-3 text-neutral-700" />}
               </React.Fragment>
             ))}
+            <button onClick={() => setAddStepOpen(true)}
+              className="ml-2 flex items-center gap-1 px-3 py-2 rounded-lg border border-dashed border-neutral-700 text-neutral-500 hover:border-neutral-500 hover:text-white text-sm whitespace-nowrap">
+              <Plus className="w-3.5 h-3.5" /> Add step
+            </button>
           </div>
+
+          {/* Add step modal */}
+          {addStepOpen && <AddStepModal onCancel={() => setAddStepOpen(false)} onAdd={addStep} />}
 
           {/* Step editor */}
           {selectedStep && <StepEditor step={selectedStep} funnel={funnel} onSaved={load} />}
         </>
       )}
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ADD STEP MODAL
+// ═══════════════════════════════════════════════════════════════════════════
+function AddStepModal({ onCancel, onAdd }: { onCancel: () => void; onAdd: (page_type: string, name: string, slug: string, has_form?: boolean) => void }) {
+  const [name, setName] = useState('')
+  const [slug, setSlug] = useState('')
+  const [pageType, setPageType] = useState('landing')
+  const [hasForm, setHasForm] = useState(false)
+
+  const templates = [
+    { key: 'landing',   name: 'Landing page',    icon: '📄', hasForm: false },
+    { key: 'opt-in',    name: 'Opt-in (form)',   icon: '📥', hasForm: true },
+    { key: 'order',     name: 'Order form',      icon: '🛒', hasForm: true },
+    { key: 'upsell',    name: 'Upsell',          icon: '⚡', hasForm: false },
+    { key: 'thank-you', name: 'Thank you',       icon: '✨', hasForm: false },
+    { key: 'custom',    name: 'Custom',          icon: '🎨', hasForm: false },
+  ]
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
+      <div className="bg-neutral-900 border border-neutral-800 rounded-xl max-w-md w-full p-5 space-y-4">
+        <div className="flex justify-between items-center">
+          <h3 className="text-lg font-semibold">Thêm step mới</h3>
+          <button onClick={onCancel} className="text-neutral-500 hover:text-white"><X className="w-5 h-5" /></button>
+        </div>
+        <div>
+          <label className="text-xs text-neutral-500 uppercase tracking-wider block mb-2">Template</label>
+          <div className="grid grid-cols-3 gap-2">
+            {templates.map(t => (
+              <button key={t.key} onClick={() => { setPageType(t.key); setHasForm(t.hasForm); if (!name) setName(t.name); if (!slug) setSlug(t.key) }}
+                className={`text-left px-2 py-2 rounded-lg border transition ${pageType === t.key ? '' : 'border-neutral-800 hover:border-neutral-700'}`}
+                style={pageType === t.key ? { borderColor: 'var(--color-mission-accent)' } : undefined}>
+                <div className="text-lg mb-0.5">{t.icon}</div>
+                <div className="text-xs">{t.name}</div>
+              </button>
+            ))}
+          </div>
+        </div>
+        <div>
+          <label className="text-xs text-neutral-500 uppercase tracking-wider block mb-1">Tên step</label>
+          <input value={name} onChange={e => setName(e.target.value)}
+            className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 rounded-lg text-sm" />
+        </div>
+        <div>
+          <label className="text-xs text-neutral-500 uppercase tracking-wider block mb-1">Slug (URL)</label>
+          <input value={slug} onChange={e => setSlug(e.target.value)}
+            className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 rounded-lg text-sm font-mono" />
+        </div>
+        <label className="flex items-center gap-2">
+          <input type="checkbox" checked={hasForm} onChange={e => setHasForm(e.target.checked)} />
+          <span className="text-sm">Step này có form thu info</span>
+        </label>
+        <div className="flex justify-end gap-2 pt-2">
+          <button onClick={onCancel} className="text-sm text-neutral-500 hover:text-white">Huỷ</button>
+          <button onClick={() => onAdd(pageType, name, slug, hasForm)} disabled={!name}
+            style={{ background: 'var(--color-mission-accent)', color: '#000' }}
+            className="inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-lg hover:opacity-90 disabled:opacity-40">
+            <Plus className="w-4 h-4" /> Thêm step
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
