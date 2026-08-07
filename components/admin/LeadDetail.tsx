@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { X, Send, ChevronDown, Loader2, Tag } from 'lucide-react'
 import { Lead, PipelineStage, LeadActivity, Course, Product } from '../../types'
 import { fetchLeadActivities, addLeadActivity, updateLead, fetchCourses, fetchCohortsForCourse } from '../../services/api'
@@ -7,6 +7,7 @@ import { formatDistanceToNow, format } from 'date-fns'
 import CareHistoryTab from './CareHistoryTab'
 import TasksTab from './TasksTab'
 import ChatConversationList from './ChatConversationList'
+import TagsEditor from './TagsEditor'
 import { useDialog } from '../../contexts/DialogContext'
 
 interface Props {
@@ -47,8 +48,6 @@ const LeadDetail: React.FC<Props> = ({ lead, stages, onClose, onUpdate }) => {
 
   // Tags
   const [tags, setTags] = useState<string[]>(lead.tags || [])
-  const [tagInput, setTagInput] = useState('')
-  const tagInputRef = useRef<HTMLInputElement>(null)
 
   // Convert modal state
   const [showConvertModal, setShowConvertModal] = useState(false)
@@ -102,30 +101,10 @@ const LeadDetail: React.FC<Props> = ({ lead, stages, onClose, onUpdate }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [convertForm.type, convertForm.product_id, products])
 
-  const commitTag = async (raw: string) => {
-    const tag = raw.trim().toLowerCase().replace(/[,;]/g, '')
-    if (!tag || tags.includes(tag)) { setTagInput(''); return }
-    const newTags = [...tags, tag]
-    setTags(newTags)
-    setTagInput('')
-    await updateLead(lead.id, { tags: newTags })
-    onUpdate({ ...lead, tags: newTags })
-  }
-
-  const removeTag = async (tag: string) => {
-    const newTags = tags.filter(t => t !== tag)
-    setTags(newTags)
-    await updateLead(lead.id, { tags: newTags })
-    onUpdate({ ...lead, tags: newTags })
-  }
-
-  const handleTagKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter' || e.key === ',') {
-      e.preventDefault()
-      commitTag(tagInput)
-    } else if (e.key === 'Backspace' && !tagInput && tags.length > 0) {
-      removeTag(tags[tags.length - 1])
-    }
+  const handleTagsChange = async (nextTags: string[]) => {
+    setTags(nextTags)
+    await updateLead(lead.id, { tags: nextTags })
+    onUpdate({ ...lead, tags: nextTags })
   }
 
   const handleAddNote = async () => {
@@ -286,31 +265,7 @@ const LeadDetail: React.FC<Props> = ({ lead, stages, onClose, onUpdate }) => {
                   <Tag size={12} className="text-gray-500" />
                   <label className="text-xs text-gray-500">Tags</label>
                 </div>
-                <div
-                  className="flex flex-wrap gap-1.5 min-h-[2.25rem] bg-gray-800 border border-gray-700 rounded-lg px-2.5 py-2 cursor-text"
-                  onClick={() => tagInputRef.current?.focus()}
-                >
-                  {tags.map(tag => (
-                    <span key={tag} className="flex items-center gap-1 text-xs px-2 py-0.5 rounded border border-gray-600 bg-gray-700 text-gray-300">
-                      {tag}
-                      <button
-                        onClick={e => { e.stopPropagation(); removeTag(tag) }}
-                        className="text-gray-500 hover:text-white transition-colors"
-                      >
-                        <X size={10} />
-                      </button>
-                    </span>
-                  ))}
-                  <input
-                    ref={tagInputRef}
-                    value={tagInput}
-                    onChange={e => setTagInput(e.target.value)}
-                    onKeyDown={handleTagKeyDown}
-                    onBlur={() => tagInput.trim() && commitTag(tagInput)}
-                    placeholder={tags.length === 0 ? 'Thêm tag... (Enter để xác nhận)' : ''}
-                    className="flex-1 min-w-[120px] bg-transparent text-xs text-white placeholder-gray-600 outline-none"
-                  />
-                </div>
+                <TagsEditor value={tags} onChange={handleTagsChange} />
               </div>
 
               {/* UTM Section */}
@@ -421,7 +376,7 @@ const LeadDetail: React.FC<Props> = ({ lead, stages, onClose, onUpdate }) => {
             <div className="relative z-10 bg-gray-900 border border-gray-700 rounded-xl w-full max-w-md shadow-2xl">
               {/* Modal Header */}
               <div className="flex items-center justify-between px-5 py-4 border-b border-gray-800">
-                <h2 className="text-sm font-semibold text-white">Chuyển đổi KHTN thành Khách hàng</h2>
+                <h2 className="text-sm font-semibold text-white">Chuyển đổi Lead thành Khách hàng</h2>
                 <button
                   onClick={() => !converting && setShowConvertModal(false)}
                   className="text-gray-500 hover:text-white"

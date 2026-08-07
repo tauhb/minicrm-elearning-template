@@ -77,7 +77,7 @@ const LeadsPipeline: React.FC = () => {
             style={{ backgroundColor: 'var(--color-mission-accent)', color: '#000' }}
           >
             <Plus size={16} />
-            Thêm KHTN
+            Thêm lead
           </button>
         </div>
       </div>
@@ -147,7 +147,7 @@ const LeadsPipeline: React.FC = () => {
         <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
           <div className="bg-gray-900 border border-gray-800 rounded-xl w-full max-w-md p-6">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold text-white">Thêm KHTN</h3>
+              <h3 className="text-lg font-semibold text-white">Thêm lead</h3>
               <button onClick={() => setShowAddLead(false)} className="text-gray-500 hover:text-white"><X size={18} /></button>
             </div>
             <form onSubmit={handleAddLead} className="space-y-4">

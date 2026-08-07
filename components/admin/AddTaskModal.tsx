@@ -199,7 +199,7 @@ const AddTaskModal: React.FC<Props> = ({
 
   const linkKindLabel = useMemo(() => ({
     none: 'Không gắn',
-    lead: 'KHTN (Lead)',
+    lead: 'Lead',
     customer: 'Khách hàng',
     order: 'Đơn hàng',
   }), [])

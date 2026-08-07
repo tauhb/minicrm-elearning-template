@@ -17,6 +17,7 @@ import {
 } from '../../services/api'
 import { CareHistory } from '../../types'
 import AddTaskModal from './AddTaskModal'
+import EmptyState from './EmptyState'
 import { supabase } from '../../services/supabase'
 import { useDialog } from '../../contexts/DialogContext'
 
@@ -289,16 +290,12 @@ const TasksView: React.FC = () => {
           ))}
         </div>
       ) : groups.length === 0 ? (
-        <div className="rounded-xl border p-12 text-center" style={{ borderColor: 'var(--theme-border)', background: 'var(--theme-surface)' }}>
-          <CheckCircle2 size={32} className="mx-auto mb-3 text-gray-600" />
-          <p className="text-sm text-gray-400">Không có task nào phù hợp với bộ lọc.</p>
-          <button
-            onClick={() => { setEditing(null); setAddOpen(true) }}
-            className="mt-4 inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-700 hover:bg-gray-800 transition-colors text-gray-300"
-          >
-            <Plus size={12} />Tạo task đầu tiên
-          </button>
-        </div>
+        <EmptyState
+          icon={CheckCircle2}
+          title="Không có task nào phù hợp"
+          description="Thử đổi bộ lọc hoặc tạo task mới để bắt đầu chăm sóc."
+          cta={{ label: 'Tạo task đầu tiên', icon: Plus, onClick: () => { setEditing(null); setAddOpen(true) } }}
+        />
       ) : (
         <div className="space-y-6">
           {groups.map(g => (
@@ -358,7 +355,7 @@ const TaskRow: React.FC<RowProps> = ({ task, currentUserId, onToggle, onEdit, on
   const isOverdue = !done && !cancelled && task.due_at && new Date(task.due_at) < new Date()
 
   const linked =
-    (task as any).lead ? { kind: 'KHTN', label: (task as any).lead.name || (task as any).lead.email, id: (task as any).lead.id }
+    (task as any).lead ? { kind: 'Lead', label: (task as any).lead.name || (task as any).lead.email, id: (task as any).lead.id }
     : (task as any).customer ? { kind: 'KH', label: (task as any).customer.display_name || (task as any).customer.email, id: (task as any).customer.id }
     : (task as any).order ? { kind: 'Đơn', label: `Đơn ${String((task as any).order.id).slice(0, 8)}`, id: (task as any).order.id }
     : null

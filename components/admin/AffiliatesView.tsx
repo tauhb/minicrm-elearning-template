@@ -232,7 +232,7 @@ export default function AffiliatesView() {
                               ? 'bg-purple-900/40 text-purple-300 border border-purple-700'
                               : 'bg-blue-900/40 text-blue-300 border border-blue-700'
                           }`}>
-                            {c._type === 'lead' ? 'KHTN' : 'Khách hàng'}
+                            {c._type === 'lead' ? 'Lead' : 'Khách hàng'}
                           </span>
                         </div>
                         <p className="text-xs text-gray-400">{c.email}</p>

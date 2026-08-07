@@ -286,7 +286,7 @@ const SettingsView: React.FC = () => {
             </p>
 
             {[
-              { key: 'lead', label: 'Capture Lead', url: webhookLeadUrl, desc: 'Nhận opt-in / quan tâm — tạo KHTN, không tạo tài khoản' },
+              { key: 'lead', label: 'Capture Lead', url: webhookLeadUrl, desc: 'Nhận opt-in / quan tâm — tạo lead, không tạo tài khoản' },
               { key: 'provision', label: 'Provision', url: webhookProvisionUrl, desc: 'Thanh toán / đăng ký xong — tạo KH + enroll + ghi đơn' },
             ].map(ep => (
               <div key={ep.key} className="mb-4 last:mb-0">
@@ -380,7 +380,7 @@ const SettingsView: React.FC = () => {
                   <div className="rounded-lg border border-gray-800 p-3 text-xs text-gray-400 leading-relaxed">
                     <span className="font-semibold text-white">POST</span>{' '}
                     <code className="font-mono" style={{ color: 'var(--color-mission-accent)' }}>{webhookLeadUrl}</code>
-                    <p className="mt-1.5">Dùng khi visitor điền form opt-in / quan tâm. Tạo KHTN trong pipeline — <strong>không</strong> tạo tài khoản đăng nhập.</p>
+                    <p className="mt-1.5">Dùng khi visitor điền form opt-in / quan tâm. Tạo lead trong pipeline — <strong>không</strong> tạo tài khoản đăng nhập.</p>
                   </div>
 
                   {/* Lead field table */}
@@ -398,7 +398,7 @@ const SettingsView: React.FC = () => {
                         </thead>
                         <tbody className="divide-y divide-gray-800">
                           {[
-                            { f: 'email',        t: 'string',   r: true,  d: 'Email KHTN' },
+                            { f: 'email',        t: 'string',   r: true,  d: 'Email lead' },
                             { f: 'name',         t: 'string',   r: false, d: 'Họ tên (mặc định: phần trước @)' },
                             { f: 'phone',        t: 'string',   r: false, d: 'Số điện thoại' },
                             { f: 'source',       t: 'string',   r: false, d: 'landing_page | facebook_ad | referral | organic' },
@@ -407,7 +407,7 @@ const SettingsView: React.FC = () => {
                             { f: 'utm_medium',   t: 'string',   r: false, d: 'UTM medium parameter' },
                             { f: 'utm_term',     t: 'string',   r: false, d: 'UTM term parameter' },
                             { f: 'utm_content',  t: 'string',   r: false, d: 'UTM content parameter' },
-                            { f: 'tags',         t: 'string[]', r: false, d: 'Tags gắn vào KHTN, VD: ["hot","k3"]' },
+                            { f: 'tags',         t: 'string[]', r: false, d: 'Tags gắn vào lead, VD: ["hot","k3"]' },
                             { f: 'notes',        t: 'string',   r: false, d: 'Ghi chú thêm' },
                             { f: 'page_url',     t: 'string',   r: false, d: 'URL trang visitor điền form' },
                           ].map(row => (

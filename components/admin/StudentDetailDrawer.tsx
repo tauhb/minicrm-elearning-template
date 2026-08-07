@@ -6,6 +6,7 @@ import CareHistoryTab from './CareHistoryTab'
 import EnrollmentsTab from './EnrollmentsTab'
 import TasksTab from './TasksTab'
 import ChatConversationList from './ChatConversationList'
+import TagsEditor from './TagsEditor'
 
 interface Props {
   student: Profile
@@ -16,7 +17,6 @@ interface Props {
 const StudentDetailDrawer: React.FC<Props> = ({ student, onClose, onUpdate }) => {
   const [notes, setNotes] = useState(student.notes || '')
   const [tags, setTags] = useState<string[]>(student.tags || [])
-  const [newTag, setNewTag] = useState('')
   const [payments, setPayments] = useState<Payment[]>([])
   const [saving, setSaving] = useState(false)
   const [activeTab, setActiveTab] = useState<'info' | 'care' | 'tasks' | 'chat' | 'courses'>('info')
@@ -60,15 +60,6 @@ const StudentDetailDrawer: React.FC<Props> = ({ student, onClose, onUpdate }) =>
       alert(`Lỗi: ${r.error || 'Không đổi được trạng thái'}`)
     }
   }
-
-  const addTag = () => {
-    if (newTag && !tags.includes(newTag)) {
-      setTags([...tags, newTag])
-      setNewTag('')
-    }
-  }
-
-  const removeTag = (tag: string) => setTags(tags.filter(t => t !== tag))
 
   return (
     <>
@@ -171,24 +162,8 @@ const StudentDetailDrawer: React.FC<Props> = ({ student, onClose, onUpdate }) =>
                 <p className="text-xs text-gray-500 uppercase tracking-widest mb-2 flex items-center gap-1.5">
                   <Tag size={10} /> Nhãn
                 </p>
-                <div className="flex flex-wrap gap-1.5 mb-2">
-                  {tags.map(tag => (
-                    <span key={tag} className="flex items-center gap-1 text-xs px-2 py-0.5 bg-gray-800 border border-gray-700 text-gray-300 rounded">
-                      {tag}
-                      <button onClick={() => removeTag(tag)} className="text-gray-500 hover:text-red-400"><X size={10} /></button>
-                    </span>
-                  ))}
-                </div>
-                <div className="flex gap-2">
-                  <input
-                    value={newTag}
-                    onChange={e => setNewTag(e.target.value)}
-                    onKeyDown={e => e.key === 'Enter' && addTag()}
-                    placeholder="Thêm nhãn..."
-                    className="flex-1 bg-gray-800 border border-gray-700 rounded px-2.5 py-1.5 text-xs text-white placeholder-gray-600 focus:outline-none"
-                  />
-                  <button onClick={addTag} className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-xs text-white rounded transition-colors">Thêm</button>
-                </div>
+                <TagsEditor value={tags} onChange={setTags} placeholder="Thêm nhãn... (Enter để xác nhận)" />
+                <p className="text-[10px] text-gray-600 mt-1.5">Nhấn "Lưu thay đổi" ở dưới để lưu</p>
               </div>
 
               {/* Notes */}

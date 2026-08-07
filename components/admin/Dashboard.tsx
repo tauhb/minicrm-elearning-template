@@ -453,7 +453,7 @@ const Dashboard: React.FC = () => {
           delta={{ current: newStudents, prev: prevStudents, label: bounds.compLabel }}
         />
         <KpiCard
-          title="KHTN mới"
+          title="Leads mới"
           value={loading ? '—' : newLeads}
           icon={GitBranch}
           loading={loading}
@@ -472,7 +472,7 @@ const Dashboard: React.FC = () => {
           value={widgetsLoading ? '—' : pipelineTotal}
           icon={BarChart2}
           loading={widgetsLoading}
-          sub={`/ ${totalLeads} tổng KHTN`}
+          sub={`/ ${totalLeads} tổng leads`}
         />
         <KpiCard
           title="Doanh thu"
@@ -609,7 +609,7 @@ const Dashboard: React.FC = () => {
           <div className="flex items-center justify-between mb-5">
             <div className="flex items-center gap-2">
               <GitBranch size={14} style={{ color: 'var(--color-mission-accent)' }} />
-              <h2 className="text-xs font-bold uppercase tracking-widest" style={{ color: 'var(--theme-text)' }}>Phễu KHTN</h2>
+              <h2 className="text-xs font-bold uppercase tracking-widest" style={{ color: 'var(--theme-text)' }}>Phễu Leads</h2>
             </div>
             <span className="text-xs" style={{ color: 'var(--theme-text-muted)' }}>{pipelineTotal} leads · thời gian thực</span>
           </div>

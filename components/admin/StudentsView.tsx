@@ -154,7 +154,7 @@ const StudentsView: React.FC = () => {
     leadSearchTimer.current = setTimeout(async () => {
       setLeadSearching(true)
       const results = await fetchLeads(leadSearch)
-      // Chỉ show KHTN chưa convert
+      // Chỉ show lead chưa convert
       setLeadResults(results.filter(l => !l.converted_at).slice(0, 8))
       setLeadSearching(false)
     }, 350)
@@ -485,7 +485,7 @@ const StudentsView: React.FC = () => {
 
               {/* Lead search */}
               <div>
-                <label className="block text-xs text-gray-500 mb-1.5">Tìm trong danh sách KHTN</label>
+                <label className="block text-xs text-gray-500 mb-1.5">Tìm trong danh sách lead</label>
                 <div className="relative">
                   <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
                   <input
@@ -524,7 +524,7 @@ const StudentsView: React.FC = () => {
                 )}
                 {addForm.leadId && (
                   <div className="mt-1.5 flex items-center gap-2 text-xs text-emerald-400 bg-emerald-950/30 border border-emerald-800/30 rounded px-2.5 py-1.5">
-                    <span>KHTN đã chọn — sẽ được đánh dấu đã chuyển đổi sau khi tạo</span>
+                    <span>Lead đã chọn — sẽ được đánh dấu đã chuyển đổi sau khi tạo</span>
                     <button type="button" onClick={() => setAddForm(p => ({ ...p, leadId: '', convertLead: false }))} className="ml-auto text-emerald-600 hover:text-emerald-400"><X size={12} /></button>
                   </div>
                 )}

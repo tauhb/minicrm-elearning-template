@@ -5,6 +5,7 @@ import { fetchPipelineStages } from '../../services/api'
 import type { Lead, PipelineStage, Profile } from '../../types'
 import LeadDetail from './LeadDetail'
 import StudentDetailDrawer from './StudentDetailDrawer'
+import LoadingState from './LoadingState'
 
 interface CannedResponse {
   id: string
@@ -242,7 +243,7 @@ export default function ChatView() {
         {/* Conversation list */}
         <div className="flex-1 overflow-y-auto">
           {loading ? (
-            <div className="p-4 text-center text-neutral-500"><Loader2 className="w-4 h-4 animate-spin mx-auto" /></div>
+            <LoadingState label="Đang tải cuộc trò chuyện..." />
           ) : conversations.length === 0 ? (
             <div className="p-4 text-center text-neutral-500 text-xs">Chưa có conversation nào</div>
           ) : conversations.map(c => (
@@ -455,7 +456,7 @@ function ConversationDetail({
     load(); onUpdate()
   }
 
-  if (loading || !detail) return <div className="flex-1 flex items-center justify-center"><Loader2 className="w-6 h-6 animate-spin" /></div>
+  if (loading || !detail) return <div className="flex-1 flex items-center justify-center"><LoadingState /></div>
 
   const { conversation: c, messages, contact, inbox } = detail
 

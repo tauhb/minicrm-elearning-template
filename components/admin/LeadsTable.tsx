@@ -4,6 +4,7 @@ import { fetchLeads, fetchPipelineStages, updateLead, createLead, addCareHistory
 import { supabase } from '../../services/supabase'
 import { Lead, PipelineStage } from '../../types'
 import LeadDetail from './LeadDetail'
+import EmptyState from './EmptyState'
 import { format } from 'date-fns'
 
 const SMARTLIST_KEY = 'khtn-smartlists'
@@ -274,8 +275,8 @@ const LeadsTable: React.FC = () => {
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-white">KHTN</h1>
-          <p className="text-gray-500 text-sm mt-1">{filtered.length} khách hàng tiềm năng{search || sourceFilter || stageFilter ? ' (đã lọc)' : ''}</p>
+          <h1 className="text-2xl font-bold text-white">Khách hàng tiềm năng</h1>
+          <p className="text-gray-500 text-sm mt-1">{filtered.length} lead{search || sourceFilter || stageFilter ? ' (đã lọc)' : ''}</p>
         </div>
         <div className="flex gap-2">
           <button onClick={exportCSV} className="flex items-center gap-2 px-3 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-400 hover:text-white rounded-lg text-sm transition-colors">
@@ -286,7 +287,7 @@ const LeadsTable: React.FC = () => {
             className="flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-lg transition-opacity hover:opacity-90"
             style={{ backgroundColor: 'var(--color-mission-accent)', color: '#000' }}
           >
-            <Plus size={16} />Thêm KHTN
+            <Plus size={16} />Thêm lead
           </button>
         </div>
       </div>
@@ -389,7 +390,7 @@ const LeadsTable: React.FC = () => {
       <div className="flex items-center gap-2 flex-wrap mb-5">
         <span className="text-xs text-gray-500 shrink-0">Tag:</span>
         {allTags.length === 0 ? (
-          <span className="text-xs text-gray-700 italic">Gắn tag cho KHTN để lọc</span>
+          <span className="text-xs text-gray-700 italic">Gắn tag cho lead để lọc</span>
         ) : (
           allTags.map(tag => {
             const active = tagFilter.includes(tag)
@@ -437,7 +438,17 @@ const LeadsTable: React.FC = () => {
                 {[...Array(8)].map((_, j) => <td key={j} className="px-4 py-3"><div className="h-4 bg-gray-800 rounded animate-pulse" /></td>)}
               </tr>
             )) : filtered.length === 0 ? (
-              <tr><td colSpan={8} className="text-center text-gray-600 py-12">Không tìm thấy KHTN</td></tr>
+              <tr>
+                <td colSpan={8} className="p-6">
+                  <EmptyState
+                    title={hasActiveFilter ? 'Không tìm thấy lead phù hợp' : 'Chưa có lead nào'}
+                    description={hasActiveFilter ? 'Thử bỏ bộ lọc hoặc mở rộng phạm vi tìm kiếm.' : 'Thêm lead thủ công hoặc bật form opt-in trên trang đích.'}
+                    cta={hasActiveFilter
+                      ? { label: 'Xóa bộ lọc', onClick: resetFilters }
+                      : { label: 'Thêm lead', icon: Plus, onClick: () => setShowAdd(true) }}
+                  />
+                </td>
+              </tr>
             ) : filtered.map(lead => (
               <tr key={lead.id} className="border-b border-gray-800 hover:bg-gray-800/40 transition-colors">
                 <td className="px-4 py-3">
@@ -643,7 +654,7 @@ const LeadsTable: React.FC = () => {
       {showAdd && (
         <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
           <div className="bg-gray-900 border border-gray-800 rounded-xl w-full max-w-md p-6">
-            <h3 className="text-lg font-semibold text-white mb-4">Thêm KHTN</h3>
+            <h3 className="text-lg font-semibold text-white mb-4">Thêm lead</h3>
             <form onSubmit={handleAddLead} className="space-y-4">
               {[{ label: 'Họ tên *', field: 'name', type: 'text', placeholder: 'Nguyen Van A' }, { label: 'Email *', field: 'email', type: 'email', placeholder: 'lead@email.com' }, { label: 'Điện thoại', field: 'phone', type: 'tel', placeholder: '0901234567' }].map(f => (
                 <div key={f.field}>

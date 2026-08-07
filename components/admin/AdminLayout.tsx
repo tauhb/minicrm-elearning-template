@@ -18,7 +18,7 @@ const EmailMarketingView = React.lazy(() => import('./EmailMarketingView'))
 
 const NAV_ITEMS = [
   { to: '/admin',          label: 'Tổng quan',      icon: LayoutDashboard, end: true },
-  { to: '/admin/leads',    label: 'KHTN',           icon: List },
+  { to: '/admin/leads',    label: 'Leads',          icon: List },
   { to: '/admin/pipeline', label: 'Quy trình sale', icon: GitBranch },
   { to: '/admin/orders',   label: 'Đơn hàng',       icon: ShoppingCart },
   { to: '/admin/students', label: 'Khách hàng',     icon: Users },

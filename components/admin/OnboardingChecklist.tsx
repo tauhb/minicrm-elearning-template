@@ -136,7 +136,7 @@ const OnboardingChecklist: React.FC<Props> = ({ onCountChange }) => {
       id: 'lead',
       icon: List,
       label: 'Nhập lead đầu tiên',
-      hint: leadsCount > 0 ? `${leadsCount} KHTN.` : 'Nhập tay 1 lead thử hoặc import CSV để test pipeline.',
+      hint: leadsCount > 0 ? `${leadsCount} leads.` : 'Nhập tay 1 lead thử hoặc import CSV để test pipeline.',
       done: leadsCount > 0,
       onClick: () => navigate('/admin/leads'),
     },

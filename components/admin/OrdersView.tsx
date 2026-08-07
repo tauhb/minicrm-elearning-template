@@ -7,6 +7,7 @@ import { format, formatDistanceToNowStrict } from 'date-fns'
 import { vi } from 'date-fns/locale'
 import { useDialog } from '../../contexts/DialogContext'
 import OrderDetailModal, { UnifiedOrder } from './OrderDetailModal'
+import EmptyState from './EmptyState'
 
 const STATUS_COLORS: Record<string, string> = {
   completed: 'text-emerald-400 bg-emerald-400/10 border-emerald-400/20',
@@ -433,10 +434,13 @@ const OrdersView: React.FC = () => {
               </tr>
             )) : filtered.length === 0 ? (
               <tr>
-                <td colSpan={8} className="text-center text-gray-600 py-12">
-                  {tab === 'pending'
-                    ? 'Không có đơn nào đang chờ QR'
-                    : 'Không có đơn hàng'}
+                <td colSpan={8} className="p-6">
+                  <EmptyState
+                    title={tab === 'pending' ? 'Không có đơn đang chờ QR' : 'Chưa có đơn hàng'}
+                    description={tab === 'pending'
+                      ? 'Khi khách quét QR và thanh toán, đơn sẽ tự động chuyển sang tab "Đã thanh toán".'
+                      : 'Đơn hàng sẽ hiện tại đây khi có khách mua qua funnel hoặc bạn tạo thủ công.'}
+                  />
                 </td>
               </tr>
             ) : filtered.map(order => (
