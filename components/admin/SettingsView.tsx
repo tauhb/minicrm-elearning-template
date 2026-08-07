@@ -1,12 +1,13 @@
 import React, { useEffect, useState } from 'react'
-import { Copy, Check, Webhook, Mail, Zap, Info, Sliders, ExternalLink, KeyRound, Palette, Activity, Sparkles, Layers } from 'lucide-react'
+import { Copy, Check, Webhook, Mail, Zap, Info, Sliders, ExternalLink, KeyRound, Palette, Activity, Sparkles, Layers, PenLine } from 'lucide-react'
 import type { PortalTheme } from '../../types'
 import { supabase } from '../../services/supabase'
 import { useConfig } from '../../contexts/ConfigContext'
 import AISettingsView from './AISettingsView'
 import FunnelTypesView from './FunnelTypesView'
+import CopyFormulasView from './CopyFormulasView'
 
-type Tab = 'webhook' | 'email' | 'ai' | 'funnel-types' | 'general'
+type Tab = 'webhook' | 'email' | 'ai' | 'funnel-types' | 'copy-formulas' | 'general'
 
 const THEMES: Array<{
   id: PortalTheme; name: string
@@ -209,7 +210,7 @@ const SettingsView: React.FC = () => {
   )
 
   return (
-    <div className="p-8 max-w-2xl">
+    <div className="p-8 max-w-7xl mx-auto">
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-white">Cài đặt</h1>
         <p className="text-gray-500 text-sm mt-1">Cấu hình cổng học viên</p>
@@ -222,6 +223,7 @@ const SettingsView: React.FC = () => {
           { key: 'email', label: 'Email', icon: Mail },
           { key: 'ai', label: 'AI Providers', icon: Sparkles },
           { key: 'funnel-types', label: 'Funnel Types', icon: Layers },
+          { key: 'copy-formulas', label: 'Copy Formulas', icon: PenLine },
           { key: 'general', label: 'Chung', icon: Sliders },
         ] as { key: Tab; label: string; icon: React.FC<any> }[]).map(tab => (
           <button
@@ -733,6 +735,7 @@ async function provisionAfterPayment(payment) {
 
       {activeTab === 'ai' && <AISettingsView />}
       {activeTab === 'funnel-types' && <FunnelTypesView />}
+      {activeTab === 'copy-formulas' && <CopyFormulasView />}
 
       {activeTab === 'general' && (
         <div className="space-y-6">

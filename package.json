@@ -20,7 +20,8 @@
     "portal:rebrand": "node scripts/rebrand.mjs",
     "portal:add-course": "node scripts/add-course.mjs",
     "portal:verify-deploy": "node scripts/verify-deploy.mjs",
-    "seed:funnel-types": "node scripts/seed-funnel-types.mjs"
+    "seed:funnel-types": "node scripts/seed-funnel-types.mjs",
+    "seed:copy-formulas": "node scripts/seed-copy-formulas.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.105.4",
