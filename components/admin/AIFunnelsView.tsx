@@ -6,6 +6,7 @@ import { ContentDraftEditor, CopyDraft } from './funnels/ContentDraftEditor'
 import { PaymentConfigDrawer } from './funnels/PaymentConfigDrawer'
 import { PreviewFlowModal } from './funnels/PreviewFlowModal'
 import { FormFieldsEditor, FormField } from './funnels/FormFieldsEditor'
+import { AddBlockModal } from './funnels/AddBlockModal'
 
 type Status = 'draft' | 'published' | 'archived'
 
@@ -29,6 +30,8 @@ interface StepDetail {
   copy_input: any; copy_formula_key?: string; copy_raw_input?: string
   copy_draft?: CopyDraft; copy_approved: boolean; copy_approved_at?: string
   html?: string; html_generated_from_copy_at?: string
+  html_blocks?: any[]
+  render_instructions?: string | null
   visits: number; cta_clicks: number; form_submits: number
 }
 interface FunnelType { id: string; key: string; name: string; icon: string; color: string; description: string; suggested_steps: any[] }
@@ -713,6 +716,11 @@ function StepEditor({ step, funnel, onSaved }: { step: StepDetail; funnel: Funne
   const [formFields, setFormFields] = useState<FormField[]>((step.form_fields as any) || [])
   const [formSuccessSlug, setFormSuccessSlug] = useState<string>(step.form_success_step_slug || '')
   const [savingForm, setSavingForm] = useState(false)
+  const [renderInstructions, setRenderInstructions] = useState<string>(step.render_instructions || '')
+  const [addBlockOpen, setAddBlockOpen] = useState(false)
+  const [regeneratingIndex, setRegeneratingIndex] = useState<number | null>(null)
+  const [dirtyIndices, setDirtyIndices] = useState<number[]>([])
+  const [syncing, setSyncing] = useState(false)
   const [importHtml, setImportHtml] = useState('')
   const [importConfig, setImportConfig] = useState({ strip_external_scripts: true, override_form_action: true, auto_tag_ctas: true })
   const [busy, setBusy] = useState<false | 'draft' | 'approve' | 'import' | 'save'>(false)
@@ -731,9 +739,51 @@ function StepEditor({ step, funnel, onSaved }: { step: StepDetail; funnel: Funne
     setHasForm(!!step.has_form)
     setFormFields((step.form_fields as any) || [])
     setFormSuccessSlug(step.form_success_step_slug || '')
+    setRenderInstructions(step.render_instructions || '')
+    setDirtyIndices([])
     setError(null)
     setTab((step.copy_draft as any)?.blocks?.length ? 'outline' : 'setting')
   }, [step.id])
+
+  // Auto-sync outline → HTML on debounced changes (deterministic text replace, no AI)
+  useEffect(() => {
+    if (!step.html_blocks?.length) return   // Nothing to sync yet
+    if (JSON.stringify(copyDraft) === JSON.stringify(step.copy_draft)) return
+    const timer = setTimeout(async () => {
+      setSyncing(true)
+      try {
+        const r = await api<{ synced_count: number; dirty_indices: number[] }>(
+          `/api/funnel-steps?action=sync-outline&id=${step.id}`,
+          { method: 'POST', body: JSON.stringify({ copy_draft: copyDraft }) }
+        )
+        setDirtyIndices(r.dirty_indices || [])
+        onSaved()
+      } catch (e: any) { console.error('[sync-outline]', e) }
+      finally { setSyncing(false) }
+    }, 1500)
+    return () => clearTimeout(timer)
+  }, [copyDraft])
+
+  const regenerateBlock = async (blockIndex: number) => {
+    setError(null); setRegeneratingIndex(blockIndex)
+    try {
+      await api(`/api/funnel-steps?action=regenerate-block&id=${step.id}`, {
+        method: 'POST',
+        body: JSON.stringify({
+          block_index: blockIndex,
+          content: copyDraft.blocks[blockIndex]?.content,
+          render_instructions: renderInstructions,
+        }),
+      })
+      setDirtyIndices(prev => prev.filter(i => i !== blockIndex))
+      onSaved()
+    } catch (e: any) { setError(e.message) }
+    finally { setRegeneratingIndex(null) }
+  }
+
+  const addBlock = (block: { kind: string; content: any }) => {
+    setCopyDraft(prev => ({ ...prev, blocks: [...(prev.blocks || []), block] }))
+  }
 
   const saveFormConfig = async () => {
     setError(null); setSavingForm(true)
@@ -773,8 +823,9 @@ function StepEditor({ step, funnel, onSaved }: { step: StepDetail; funnel: Funne
     try {
       await api(`/api/funnel-steps?action=approve&id=${step.id}`, {
         method: 'POST',
-        body: JSON.stringify({ copy_draft: copyDraft }),
+        body: JSON.stringify({ copy_draft: copyDraft, render_instructions: renderInstructions }),
       })
+      setDirtyIndices([])
       onSaved()
     } catch (e: any) { setError(e.message) }
     finally { setBusy(false) }
@@ -1003,20 +1054,47 @@ function StepEditor({ step, funnel, onSaved }: { step: StepDetail; funnel: Funne
 
                 {/* Block tree — scrollable */}
                 <div className="flex-1 overflow-y-auto pr-2 mb-3">
-                  <ContentDraftEditor value={copyDraft} onChange={setCopyDraft} />
+                  <ContentDraftEditor
+                    value={copyDraft}
+                    onChange={setCopyDraft}
+                    onAddBlock={() => setAddBlockOpen(true)}
+                    onRegenerateBlock={regenerateBlock}
+                    regeneratingIndex={regeneratingIndex}
+                    dirtyIndices={dirtyIndices}
+                  />
+                </div>
+
+                {/* Render instructions — extra requirements before HTML gen */}
+                <div className="mb-3 flex-shrink-0">
+                  <label className="text-[10px] text-neutral-500 uppercase tracking-wider block mb-1 flex items-center gap-2">
+                    Yêu cầu thêm cho HTML (optional)
+                    {syncing && <span className="text-[10px] text-neutral-500 flex items-center gap-1"><Loader2 className="w-2.5 h-2.5 animate-spin" /> syncing outline...</span>}
+                  </label>
+                  <textarea value={renderInstructions} onChange={e => setRenderInstructions(e.target.value)}
+                    className="w-full px-2 py-1.5 bg-neutral-950 border border-neutral-800 rounded text-xs" rows={2}
+                    placeholder='VD: "Không dùng gradient", "CTA button to hơn", "Thêm hover animation", "Không hiển thị pricing"' />
                 </div>
 
                 {/* Approve button — sticky bottom */}
                 <button onClick={approve} disabled={busy !== false}
                   className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 border border-green-500/50 text-green-400 rounded-lg hover:bg-green-500/10 disabled:opacity-40 flex-shrink-0">
                   {busy === 'approve' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
-                  Duyệt content → tạo HTML
+                  Duyệt content → tạo HTML {dirtyIndices.length > 0 && <span className="text-xs text-amber-400">({dirtyIndices.length} block cần regen)</span>}
                 </button>
               </>
             )}
           </div>
         )}
       </div>
+
+      {/* Add block modal */}
+      {addBlockOpen && (
+        <AddBlockModal
+          stepId={step.id}
+          onClose={() => setAddBlockOpen(false)}
+          onAdd={addBlock}
+        />
+      )}
 
       {/* RIGHT: HTML Preview */}
       <div className="col-span-6 border border-neutral-800 rounded-xl overflow-hidden bg-white flex flex-col max-h-[calc(100vh-260px)]">

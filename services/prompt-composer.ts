@@ -183,6 +183,7 @@ export interface ComposeBlockRenderInput {
   block: { kind: string; content: any }
   style: StyleInstructions
   stepMeta: { name: string; page_type: string; has_form: boolean; form_fields?: any[] }
+  renderInstructions?: string    // Extra user constraints (VD: "không dùng gradient")
 }
 
 export async function composeBlockRenderPrompts(input: ComposeBlockRenderInput): Promise<{ system: string; user: string }> {
@@ -192,6 +193,9 @@ export async function composeBlockRenderPrompts(input: ComposeBlockRenderInput):
   if (base.prompt) parts.push(base.prompt)
   parts.push('---\n\n' + styleInstructionsBlock(input.style))
   parts.push('---\n\n' + BLOCK_TO_HTML_GUIDE)
+  if (input.renderInstructions && input.renderInstructions.trim()) {
+    parts.push('---\n\n# YÊU CẦU BỔ SUNG CỦA USER (BẮT BUỘC ÁP DỤNG)\n\n' + input.renderInstructions.trim())
+  }
   parts.push('---\n\n' + BLOCK_RUNTIME_RULES)
 
   const system = parts.join('\n\n')
