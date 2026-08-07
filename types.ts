@@ -110,11 +110,16 @@ export interface CourseSettings {
 }
 
 // --- SUPABASE PROFILE ---
+export type CustomerRole = 'owner' | 'admin' | 'sales' | 'support' | 'student' | 'affiliate'
+export type CustomerStatus = 'active' | 'deactivated'
+
 export interface Customer {
   id: string
   email: string
   display_name: string
-  role: 'student' | 'admin' | 'sales'
+  role: CustomerRole
+  status?: CustomerStatus                 // NEW (migration 015): soft-delete
+  phone?: string | null                    // NEW (migration 015): backfilled from lead on convert
   // cohort, start_date đã được chuyển sang customer_courses (enrollment-based)
   payment_status: 'pending' | 'paid' | 'refunded'
   payment_ref: string | null
@@ -168,18 +173,54 @@ export interface LeadActivity {
 
 export type CareHistoryType = 'call' | 'zalo' | 'email' | 'meeting' | 'note' | 'follow_up'
 export type CareHistoryResult = 'success' | 'no_answer' | 'interested' | 'not_interested' | 'purchased'
+export type CareHistoryKind = 'care_log' | 'task'      // NEW (migration 015)
+export type TaskStatus = 'open' | 'done' | 'cancelled'
+export type TaskPriority = 'low' | 'medium' | 'high'
 
+/**
+ * care_history serves 2 roles (kind field):
+ *   - 'care_log' (default): past event, backward compat with pre-015 rows.
+ *   - 'task': future scheduled action with due_at + status + optional assignment.
+ * Fields marked "task-only" are only meaningful when kind='task'.
+ */
 export interface CareHistory {
   id: string
   lead_id: string | null
   customer_id: string | null
+  order_id?: string | null                 // task-only: link to payments row
   type: CareHistoryType
   content: string | null
   result: CareHistoryResult | null
-  next_follow_up_date: string | null
+  next_follow_up_date: string | null       // legacy DATE-precision follow-up (care_log)
   created_by: string | null
   created_at: string
   creator?: { display_name: string }
+
+  // ── kind='task' fields (all NULL for care_log rows) ─────────────────────
+  kind?: CareHistoryKind
+  title?: string | null                    // task title
+  status?: TaskStatus                       // open | done | cancelled
+  priority?: TaskPriority                   // low | medium | high
+  due_at?: string | null                    // TIMESTAMPTZ
+  completed_at?: string | null
+  assigned_to?: string | null
+}
+
+/** Alias for callers thinking in "task" terms — same row, different lens.
+ *  (Note: bare "Task" is taken by the gamification model in this file.) */
+export type CrmTask = CareHistory
+
+export interface AuditLogEntry {
+  id: string
+  actor_id: string | null
+  actor_email: string | null
+  action: string                            // e.g. 'lead.convert', 'user.role_change'
+  target_type: string | null
+  target_id: string | null
+  changes: Record<string, any> | null
+  ip: string | null
+  user_agent: string | null
+  created_at: string
 }
 
 export interface Payment {

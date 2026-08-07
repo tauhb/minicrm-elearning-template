@@ -1,5 +1,8 @@
-// api/webhook-sepay.ts — Vercel Serverless Function
-// SePay gọi endpoint này khi có thanh toán thành công
+// api/webhook-sepay.ts — LEGACY Vercel Serverless Function.
+// Kept only for backward compatibility: existing SePay accounts may still POST here.
+// NEW installs should point SePay at /api/f/sepay-webhook (funnel-aware, has idempotency,
+// creates funnel_orders + payments in one flow).
+// Wave 1 Track B will unify both endpoints; do not delete until then.
 // URL: https://your-portal.vercel.app/api/webhook-sepay
 
 import type { VercelRequest, VercelResponse } from '@vercel/node'
