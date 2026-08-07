@@ -53,7 +53,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return res.json(data)
       }
       const { data } = await admin.from('copy_formulas')
-        .select('id, key, name, description, is_builtin, is_active, sort_order, updated_at')
+        .select('id, key, name, description, page_type_filter, is_builtin, is_active, sort_order, updated_at')
         .order('sort_order').order('name')
       return res.json({ formulas: data || [] })
     }
@@ -74,6 +74,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const payload: any = {
         key, name: body.name, description: body.description || '',
         system_prompt: body.system_prompt,
+        page_type_filter: Array.isArray(body.page_type_filter) ? body.page_type_filter : null,
         is_active: body.is_active !== false,
         sort_order: body.sort_order || 100,
         updated_at: new Date().toISOString(),

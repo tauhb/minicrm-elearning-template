@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react'
-import { Sparkles, Plus, Loader2, Eye, Edit2, Trash2, ExternalLink, Send, ChevronLeft, Layers, Wand2, FileCode2, X, Check, ArrowRight, Copy, Save, Zap, ArrowUp, ArrowDown, Settings2, Tag, CreditCard } from 'lucide-react'
+import { Sparkles, Plus, Loader2, Eye, Edit2, Trash2, ExternalLink, Send, ChevronLeft, Layers, Wand2, FileCode2, X, Check, ArrowRight, Copy, Save, Zap, ArrowUp, ArrowDown, Settings2, Tag, CreditCard, RefreshCw } from 'lucide-react'
 import { supabase } from '../../services/supabase'
 import { StylePicker, StylePreset } from './funnels/StylePicker'
 import { ContentDraftEditor, CopyDraft, ensureBlockIds, newBlockId } from './funnels/ContentDraftEditor'
@@ -32,10 +32,12 @@ interface StepDetail {
   html?: string; html_generated_from_copy_at?: string
   html_blocks?: any[]
   render_instructions?: string | null
+  page_title?: string | null
+  page_description?: string | null
   visits: number; cta_clicks: number; form_submits: number
 }
 interface FunnelType { id: string; key: string; name: string; icon: string; color: string; description: string; suggested_steps: any[] }
-interface Formula { id: string; key: string; name: string; description: string }
+interface Formula { id: string; key: string; name: string; description: string; page_type_filter?: string[] | null }
 
 async function api<T = any>(path: string, opts: RequestInit = {}): Promise<T> {
   const { data: { session } } = await supabase.auth.getSession()
@@ -565,6 +567,14 @@ function FunnelDetailView({ id, onBack }: { id: string; onBack: () => void }) {
                     <span>{s.name}</span>
                     {s.html && <Check className="w-3 h-3 text-green-400" />}
                   </button>
+                  {s.html && funnel.status === 'published' && (
+                    <a href={`/f/${funnel.slug}/${s.slug}`} target="_blank" rel="noopener noreferrer"
+                      className="p-1.5 hover:bg-neutral-800 rounded text-neutral-500 hover:text-white"
+                      title={`Xem live: /f/${funnel.slug}/${s.slug}`}
+                      onClick={e => e.stopPropagation()}>
+                      <ExternalLink className="w-3.5 h-3.5" />
+                    </a>
+                  )}
                   <button onClick={() => setStepMenuOpen(stepMenuOpen === s.id ? null : s.id)}
                     className="p-1.5 hover:bg-neutral-800 rounded" title="Actions">
                     <Settings2 className="w-3.5 h-3.5 text-neutral-500" />
@@ -717,10 +727,14 @@ function StepEditor({ step, funnel, onSaved }: { step: StepDetail; funnel: Funne
   const [formSuccessSlug, setFormSuccessSlug] = useState<string>(step.form_success_step_slug || '')
   const [savingForm, setSavingForm] = useState(false)
   const [renderInstructions, setRenderInstructions] = useState<string>(step.render_instructions || '')
+  const [pageTitle, setPageTitle] = useState<string>(step.page_title || '')
+  const [pageDescription, setPageDescription] = useState<string>(step.page_description || '')
   const [addBlockOpen, setAddBlockOpen] = useState(false)
   const [regeneratingIndex, setRegeneratingIndex] = useState<number | null>(null)
   const [dirtyIndices, setDirtyIndices] = useState<number[]>([])
   const [syncing, setSyncing] = useState(false)
+  const [savingOutline, setSavingOutline] = useState(false)
+  const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null)
   const [importHtml, setImportHtml] = useState('')
   const [importConfig, setImportConfig] = useState({ strip_external_scripts: true, override_form_action: true, auto_tag_ctas: true })
   const [busy, setBusy] = useState<false | 'draft' | 'approve' | 'import' | 'save'>(false)
@@ -741,8 +755,11 @@ function StepEditor({ step, funnel, onSaved }: { step: StepDetail; funnel: Funne
     setFormFields((step.form_fields as any) || [])
     setFormSuccessSlug(step.form_success_step_slug || '')
     setRenderInstructions(step.render_instructions || '')
+    setPageTitle(step.page_title || '')
+    setPageDescription(step.page_description || '')
     setDirtyIndices([])
     setDirty(false)
+    setLastSavedAt(null)
     setError(null)
     setTab((step.copy_draft as any)?.blocks?.length ? 'outline' : 'setting')
   }, [step.id])
@@ -754,10 +771,36 @@ function StepEditor({ step, funnel, onSaved }: { step: StepDetail; funnel: Funne
     else setDirty(false)
   }, [copyDraft, step.copy_draft])
 
-  // Sync outline → HTML deterministically (no AI). Triggered on blur, explicit button, or 5s idle fallback.
+  // Save outline (copy_draft) silently — fast, no HTML render
+  const saveOutline = async (silent = false) => {
+    if (!dirty) return
+    setSavingOutline(true)
+    try {
+      await api('/api/funnel-steps', {
+        method: 'POST',
+        body: JSON.stringify({
+          id: step.id, funnel_id: step.funnel_id,
+          name: step.name, slug: step.slug, page_type: step.page_type,
+          copy_draft: copyDraft,
+        }),
+      })
+      setLastSavedAt(new Date())
+      setDirty(false)
+      if (!silent) onSaved()
+    } catch (e: any) { setError(e.message) }
+    finally { setSavingOutline(false) }
+  }
+
+  // Auto-save every 3s (silent — only saves copy_draft, doesn't touch HTML)
+  useEffect(() => {
+    if (!dirty || savingOutline || syncing) return
+    const timer = setTimeout(() => saveOutline(true), 3000)
+    return () => clearTimeout(timer)
+  }, [copyDraft, dirty])
+
+  // Sync outline → HTML (manual only — button click)
   const doSync = async () => {
     if (!step.html_blocks?.length && !copyDraft.blocks.some(b => b.id)) return
-    if (!dirty) return
     setSyncing(true)
     try {
       const r = await api<{ synced_count: number; dirty_indices: number[] }>(
@@ -766,17 +809,31 @@ function StepEditor({ step, funnel, onSaved }: { step: StepDetail; funnel: Funne
       )
       setDirtyIndices(r.dirty_indices || [])
       setDirty(false)
+      setLastSavedAt(new Date())
       onSaved()
     } catch (e: any) { console.error('[sync-outline]', e); setError(e.message) }
     finally { setSyncing(false) }
   }
 
-  // Fallback: sync after 5s idle if user keeps typing without blur
-  useEffect(() => {
-    if (!dirty || syncing) return
-    const timer = setTimeout(doSync, 5000)
-    return () => clearTimeout(timer)
-  }, [copyDraft, dirty])
+  const savePageMeta = async () => {
+    try {
+      await api('/api/funnel-steps', {
+        method: 'POST',
+        body: JSON.stringify({
+          id: step.id, funnel_id: step.funnel_id,
+          name: step.name, slug: step.slug, page_type: step.page_type,
+          page_title: pageTitle, page_description: pageDescription,
+        }),
+      })
+      onSaved()
+    } catch (e: any) { setError(e.message) }
+  }
+
+  // Filter formulas by step's page_type
+  const currentFormulas = formulas.filter(f => {
+    if (!f.page_type_filter || f.page_type_filter.length === 0) return true
+    return f.page_type_filter.includes(step.page_type)
+  })
 
   const regenerateBlock = async (blockIndex: number) => {
     setError(null); setRegeneratingIndex(blockIndex)
@@ -936,12 +993,17 @@ function StepEditor({ step, funnel, onSaved }: { step: StepDetail; funnel: Funne
             {mode === 'ai_draft' && (
               <>
                 <div>
-                  <label className="text-xs text-neutral-500 uppercase tracking-wider block mb-1">Công thức viết</label>
+                  <label className="text-xs text-neutral-500 uppercase tracking-wider block mb-1">
+                    Công thức viết ({currentFormulas.length} phù hợp với "{step.page_type}")
+                  </label>
                   <select value={formulaKey} onChange={e => setFormulaKey(e.target.value)}
                     className="w-full px-3 py-2 bg-neutral-900 border border-neutral-800 rounded-lg text-sm">
-                    {formulas.map(f => <option key={f.key} value={f.key}>{f.name}</option>)}
+                    {currentFormulas.map(f => <option key={f.key} value={f.key}>{f.name}</option>)}
+                    {!currentFormulas.find(f => f.key === formulaKey) && formulaKey && (
+                      <option value={formulaKey}>{formulaKey} (không match page_type)</option>
+                    )}
                   </select>
-                  <p className="text-xs text-neutral-500 mt-1">{formulas.find(f => f.key === formulaKey)?.description}</p>
+                  <p className="text-xs text-neutral-500 mt-1">{currentFormulas.find(f => f.key === formulaKey)?.description || formulas.find(f => f.key === formulaKey)?.description}</p>
                 </div>
                 <div>
                   <label className="text-xs text-neutral-500 uppercase tracking-wider block mb-1">Raw input cho step này (optional)</label>
@@ -994,6 +1056,31 @@ function StepEditor({ step, funnel, onSaved }: { step: StepDetail; funnel: Funne
                 {mode === 'ai_direct' ? 'AI Direct (1-step) coming soon. Hiện dùng AI Draft (2-step) — chất lượng tốt hơn.' : 'Blank mode: viết HTML tay coming soon.'}
               </div>
             )}
+
+            {/* Page metadata (SEO) */}
+            <div className="border-t border-neutral-800 pt-4">
+              <label className="text-xs text-neutral-500 uppercase tracking-wider block mb-2">Page metadata (SEO)</label>
+              <div className="space-y-2">
+                <div>
+                  <label className="text-[10px] text-neutral-500 block mb-1">Page title (HTML &lt;title&gt;)</label>
+                  <input value={pageTitle} onChange={e => setPageTitle(e.target.value)}
+                    className="w-full px-2 py-1.5 bg-neutral-950 border border-neutral-800 rounded text-xs"
+                    placeholder={`Default: "${step.name}"`} />
+                </div>
+                <div>
+                  <label className="text-[10px] text-neutral-500 block mb-1">Meta description (SEO snippet, 150-160 chars)</label>
+                  <textarea value={pageDescription} onChange={e => setPageDescription(e.target.value)}
+                    rows={2} maxLength={200}
+                    className="w-full px-2 py-1.5 bg-neutral-950 border border-neutral-800 rounded text-xs"
+                    placeholder="Mô tả ngắn về page (SEO + Open Graph)" />
+                  <p className="text-[10px] text-neutral-600 mt-0.5">{pageDescription.length}/200 chars</p>
+                </div>
+                <button onClick={savePageMeta}
+                  className="text-xs px-3 py-1.5 border border-neutral-700 rounded hover:bg-neutral-800 flex items-center gap-1">
+                  <Save className="w-3 h-3" /> Save metadata
+                </button>
+              </div>
+            </div>
 
             {/* Form config (always visible in Setting tab) */}
             <div className="border-t border-neutral-800 pt-4">
@@ -1078,7 +1165,6 @@ function StepEditor({ step, funnel, onSaved }: { step: StepDetail; funnel: Funne
                     onChange={setCopyDraft}
                     onAddBlock={() => setAddBlockOpen(true)}
                     onRegenerateBlock={regenerateBlock}
-                    onBlurTrigger={doSync}
                     regeneratingIndex={regeneratingIndex}
                     dirtyIndices={dirtyIndices}
                     funnelId={funnel.id}
@@ -1086,23 +1172,30 @@ function StepEditor({ step, funnel, onSaved }: { step: StepDetail; funnel: Funne
                   />
                 </div>
 
-                {/* Modified indicator + explicit Sync button */}
-                <div className="flex items-center justify-between mb-2 text-[11px] flex-shrink-0">
-                  <div className="flex items-center gap-2 text-neutral-500">
-                    {syncing ? (
+                {/* Status + Save + Sync buttons */}
+                <div className="flex items-center justify-between mb-2 flex-shrink-0 gap-2">
+                  <div className="flex items-center gap-2 text-[11px] text-neutral-500 flex-1 min-w-0 truncate">
+                    {savingOutline ? (
+                      <><Loader2 className="w-3 h-3 animate-spin" /> Đang lưu outline...</>
+                    ) : syncing ? (
                       <><Loader2 className="w-3 h-3 animate-spin" /> Đang sync HTML từ outline...</>
                     ) : dirty ? (
-                      <span className="text-amber-400">● Đã sửa — HTML sẽ sync khi anh xong (blur/click chỗ khác) hoặc bấm Sync</span>
+                      <span className="text-amber-400">● Chưa lưu (auto-save 3s)</span>
+                    ) : lastSavedAt ? (
+                      <span className="text-green-500">✓ Đã lưu lúc {lastSavedAt.toLocaleTimeString('vi-VN')}</span>
                     ) : (
-                      <span className="text-green-500">✓ HTML đã sync với outline</span>
+                      <span>outline khớp với DB</span>
                     )}
                   </div>
-                  {dirty && (
-                    <button onClick={doSync} disabled={syncing}
-                      className="text-xs px-2 py-1 border border-neutral-700 rounded hover:bg-neutral-800 disabled:opacity-40">
-                      Sync ngay
-                    </button>
-                  )}
+                  <button onClick={() => saveOutline(false)} disabled={!dirty || savingOutline}
+                    className="text-xs px-2 py-1 border border-neutral-700 rounded hover:bg-neutral-800 disabled:opacity-40 flex items-center gap-1">
+                    <Save className="w-3 h-3" /> Save outline
+                  </button>
+                  <button onClick={doSync} disabled={syncing || !step.html_blocks?.length}
+                    className="text-xs px-2 py-1 border border-neutral-700 rounded hover:bg-neutral-800 disabled:opacity-40 flex items-center gap-1"
+                    title="Rebuild HTML từ outline (deterministic — text replace, không AI)">
+                    <RefreshCw className={`w-3 h-3 ${syncing ? 'animate-spin' : ''}`} /> Sync HTML
+                  </button>
                 </div>
 
                 {/* Render instructions — extra requirements before HTML gen */}

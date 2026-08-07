@@ -50,7 +50,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   // Verify funnel is published
   const { data: flow } = await admin.from('funnel_flows')
-    .select('id, slug, status, tags_to_apply, payment_mode, payment_config').eq('id', funnel_id).maybeSingle()
+    .select('id, slug, status, type_key, tags_to_apply, payment_mode, payment_config').eq('id', funnel_id).maybeSingle()
   if (!flow || flow.status !== 'published') {
     return res.status(404).json({ error: 'Funnel not published' })
   }
@@ -61,9 +61,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!step) return res.status(404).json({ error: 'Step not found' })
 
   // Extract field values (skip system fields)
+  const SYS_FIELDS = new Set(['funnel_id', 'step_id', 'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content'])
   const fieldData: Record<string, any> = {}
   for (const [k, v] of Object.entries(data)) {
-    if (k === 'funnel_id' || k === 'step_id') continue
+    if (SYS_FIELDS.has(k)) continue
     fieldData[k] = v
   }
 
@@ -73,17 +74,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     || (req.headers['x-real-ip'] as string) || 'unknown'
   const visitorId = crypto.createHash('sha256').update(`${ip}|${ua}`).digest('hex').slice(0, 32)
 
-  // Parse UTM from referrer
-  let utm_source, utm_medium, utm_campaign
-  try {
-    const ref = req.headers.referer as string
-    if (ref) {
-      const rurl = new URL(ref)
-      utm_source = rurl.searchParams.get('utm_source') || undefined
-      utm_medium = rurl.searchParams.get('utm_medium') || undefined
-      utm_campaign = rurl.searchParams.get('utm_campaign') || undefined
-    }
-  } catch {}
+  // Prefer UTM from form hidden inputs (client captured from URL when page loaded)
+  // Fallback to referrer parsing (if form didn't include UTM)
+  let utm_source = (data.utm_source as string) || undefined
+  let utm_medium = (data.utm_medium as string) || undefined
+  let utm_campaign = (data.utm_campaign as string) || undefined
+  if (!utm_source && !utm_medium && !utm_campaign) {
+    try {
+      const ref = req.headers.referer as string
+      if (ref) {
+        const rurl = new URL(ref)
+        utm_source = rurl.searchParams.get('utm_source') || undefined
+        utm_medium = rurl.searchParams.get('utm_medium') || undefined
+        utm_campaign = rurl.searchParams.get('utm_campaign') || undefined
+      }
+    } catch {}
+  }
 
   // Save submission
   const { data: submission, error: subErr } = await admin.from('funnel_form_submissions').insert({
@@ -149,6 +155,46 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     await admin.from('funnel_steps').update({
       form_submits: (Number(current.form_submits) || 0) + 1
     }).eq('id', step_id)
+  }
+
+  // ── Create pending payment row in payments table for Sales funnel order steps
+  //    (works for collect_only mode; SePay flow will UPDATE this row on webhook)
+  let pendingPaymentId: string | null = null
+  const isSalesOrder = step.page_type === 'order' && flow.type_key === 'sales'
+  if (isSalesOrder) {
+    try {
+      // Resolve amount from fixed config OR form field
+      let amt = 0
+      const pc: any = flow.payment_config || {}
+      if (pc.amount_mode === 'from_form' && pc.amount_form_field) {
+        const raw = fieldData[pc.amount_form_field]
+        amt = typeof raw === 'string' ? parseInt(raw.replace(/[^\d]/g, ''), 10) : Number(raw)
+      } else if (pc.fixed_amount) {
+        amt = Number(pc.fixed_amount)
+      }
+      if (isNaN(amt) || amt < 0) amt = 0
+
+      // Look up lead by email (will be created below if not exists)
+      let leadForPayment: string | null = null
+      if (fieldData.email) {
+        const { data: existing } = await admin.from('leads').select('id').eq('email', fieldData.email).maybeSingle()
+        leadForPayment = existing?.id || null
+      }
+
+      const { data: pay } = await admin.from('payments').insert({
+        lead_id: leadForPayment,
+        amount: amt,
+        currency: 'VND',
+        status: 'pending',
+        gateway: flow.payment_mode === 'inline_qr' ? 'sepay' : 'funnel_manual',
+        gateway_ref: `FN-${submission.id.slice(0, 8)}`,
+        order_note: `Funnel "${flow.slug}" / Step ${step.id.slice(0, 8)} (customer: ${fieldData.name || fieldData.email || 'unknown'})`,
+      }).select('id').single()
+      pendingPaymentId = pay?.id || null
+    } catch (e: any) {
+      console.error('[funnel-submit] payment create error:', e.message)
+      // Non-blocking — form submit still succeeds
+    }
   }
 
   // ── SePay: if this is an order step and funnel has inline_qr payment configured

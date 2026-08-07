@@ -25,12 +25,13 @@ const SB_URL = process.env.VITE_SUPABASE_URL
 const SB_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY
 if (!SB_URL || !SB_KEY) { console.error('Missing SUPABASE keys'); process.exit(1) }
 
+const LANDING_FILTER = ['landing', 'opt-in', 'custom']
 const FORMULAS = [
   {
     key: 'pas',
     name: 'PAS — Problem, Agitate, Solution',
     description: 'Direct response classic. Xoáy pain point mạnh trước khi giới thiệu giải pháp.',
-    sort_order: 10,
+    sort_order: 10, page_type_filter: LANDING_FILTER,
     system_prompt: `Formula: PAS (Problem → Agitate → Solution)
 
 Bạn viết copy theo cấu trúc 3 bước:
@@ -57,7 +58,7 @@ Block order gợi ý cho landing page dùng PAS:
     key: 'aida',
     name: 'AIDA — Attention, Interest, Desire, Action',
     description: 'Classic marketing framework. Cân bằng, dùng cho phần lớn cases.',
-    sort_order: 20,
+    sort_order: 20, page_type_filter: LANDING_FILTER,
     system_prompt: `Formula: AIDA (Attention → Interest → Desire → Action)
 
 Bạn viết copy theo cấu trúc 4 bước:
@@ -86,7 +87,7 @@ Block order gợi ý:
     key: 'bab',
     name: 'BAB — Before, After, Bridge',
     description: 'Transformation story. Ideal khi target đang stuck ở tình huống rõ ràng.',
-    sort_order: 30,
+    sort_order: 30, page_type_filter: LANDING_FILTER,
     system_prompt: `Formula: BAB (Before → After → Bridge)
 
 Bạn viết copy theo cấu trúc transformation:
@@ -118,7 +119,7 @@ Block order:
     key: '4ps',
     name: '4Ps — Picture, Promise, Prove, Push',
     description: 'Long-form narrative. Phù hợp sales page dài, chuyện kể sâu.',
-    sort_order: 40,
+    sort_order: 40, page_type_filter: LANDING_FILTER,
     system_prompt: `Formula: 4Ps (Picture → Promise → Prove → Push)
 
 Bạn viết copy theo cấu trúc long-form narrative:
@@ -158,7 +159,7 @@ Block order (long-form):
     key: 'quest',
     name: 'QUEST — Qualify, Understand, Educate, Stimulate, Transition',
     description: 'Advanced. Cho audience niche hoặc high-ticket. Filter khách phù hợp.',
-    sort_order: 50,
+    sort_order: 50, page_type_filter: LANDING_FILTER,
     system_prompt: `Formula: QUEST (Qualify → Understand → Educate → Stimulate → Transition)
 
 Bạn viết copy theo cấu trúc filter-and-convert:
@@ -192,7 +193,7 @@ Block order:
     key: 'star-story-solution',
     name: 'Star-Story-Solution — Personal brand',
     description: 'Cho personal brand / coach / creator. Kể chuyện bạn để bán.',
-    sort_order: 60,
+    sort_order: 60, page_type_filter: LANDING_FILTER,
     system_prompt: `Formula: Star → Story → Solution
 
 Bạn viết copy theo cấu trúc personal brand narrative:
@@ -218,6 +219,171 @@ Block order:
 - faq-accordion
 - cta-simple`
   },
+  // ═════════════════ Order Form templates ═════════════════
+  {
+    key: 'order-form-basic',
+    name: 'Order Form — Basic',
+    description: 'Layout đơn giản: form thu info + tóm tắt đơn hàng, không thêm gì.',
+    sort_order: 100, page_type_filter: ['order'],
+    system_prompt: `Formula: Order Form Basic
+
+Bạn generate block outline cho ORDER FORM PAGE — nơi customer điền info và (tùy) thanh toán.
+
+Cấu trúc bắt buộc (đơn giản, focus conversion):
+1. **Hero mini** — Tiêu đề ngắn "Điền thông tin để hoàn tất đơn" + sub xác nhận sản phẩm đang mua
+2. **Order summary** — Custom block hoặc pricing-single hiển thị:
+   - Tên sản phẩm/khóa học
+   - Giá (không có anchor, thẳng thắn)
+   - Bonuses list ngắn nếu có
+3. **Form section** — cta-with-form — LUÔN có form với name/email/phone. Form fields dùng structure step.form_fields
+4. **Trust footer** — 1 dòng ngắn: "Thanh toán an toàn · Hoàn tiền 14 ngày" — custom block hoặc guarantee
+
+Block order:
+- hero (tiêu đề + xác nhận sản phẩm)
+- pricing-single (order summary)
+- cta-with-form (form thu info)
+- guarantee (trust footer)
+
+KHÔNG: nhồi thêm pain, testimonials, case study — page này để convert, không phải sell.`
+  },
+  {
+    key: 'order-form-trust',
+    name: 'Order Form — With Trust Signals',
+    description: 'Order form kèm social proof + guarantee đậm — giảm hesitation lúc chốt.',
+    sort_order: 110, page_type_filter: ['order'],
+    system_prompt: `Formula: Order Form + Trust Signals
+
+Bạn generate block outline cho ORDER FORM có trust signals để giảm friction chốt đơn.
+
+Cấu trúc:
+1. **Hero mini** — Tiêu đề + sub xác nhận sản phẩm
+2. **Order summary** — pricing-single với đầy đủ features/bonuses
+3. **Trust block** — testimonial-quote (1 quote strongest) HOẶC stats-numbers (X khách hàng, Y% hài lòng)
+4. **Form section** — cta-with-form
+5. **Guarantee** — guarantee block đậm
+6. **Payment methods** — custom block: hiển thị các phương thức (VietQR, Bank transfer, cards logos)
+
+Block order:
+- hero
+- pricing-single
+- testimonial-quote HOẶC stats-numbers
+- cta-with-form
+- guarantee
+- custom (payment methods)
+
+Tone: chuyên nghiệp, không hype. Copy ngắn gọn — page này visitors đã ready to buy.`
+  },
+  // ═════════════════ Thank You templates ═════════════════
+  {
+    key: 'thank-you-simple',
+    name: 'Thank You — Simple',
+    description: 'Xác nhận đơn/đăng ký + hint tiếp theo. Tối giản.',
+    sort_order: 200, page_type_filter: ['thank-you'],
+    system_prompt: `Formula: Thank You Simple
+
+Bạn generate block outline cho THANK YOU PAGE — page hiện sau khi user submit form hoặc thanh toán.
+
+Cấu trúc tối giản:
+1. **Hero** — Icon tick + "Cảm ơn bạn!" + xác nhận (VD: "Chúng tôi đã nhận đơn của bạn")
+2. **What next** — custom block ngắn: "Trong 24h chúng tôi sẽ liên lạc / email đã gửi tới hộp mail của bạn"
+3. **Support** — custom block: "Cần hỗ trợ? Zalo/Email ở đây"
+
+Block order:
+- hero (celebration + xác nhận)
+- custom (what next — hướng dẫn kế tiếp)
+- custom (support contact)
+
+Tone: thân thiện, nhẹ nhàng. Không upsell. Không lặp lại sales pitch.`
+  },
+  {
+    key: 'thank-you-instructions',
+    name: 'Thank You + Hướng dẫn',
+    description: 'Cảm ơn + hướng dẫn 3 bước tiếp theo + link Zalo Group / community.',
+    sort_order: 210, page_type_filter: ['thank-you'],
+    system_prompt: `Formula: Thank You + Instructions
+
+Bạn generate block outline cho THANK YOU PAGE với hướng dẫn onboarding rõ ràng.
+
+Cấu trúc:
+1. **Hero** — Icon tick + Cảm ơn + xác nhận rõ ràng gì đã xảy ra
+2. **3 bước tiếp theo** — timeline block với 3 steps concrete:
+   - Bước 1: check email (subject cụ thể)
+   - Bước 2: tham gia Zalo Group (link cụ thể)
+   - Bước 3: đợi lịch học / delivery hint
+3. **FAQ ngắn** — 3-5 câu hỏi phổ biến ("Chưa nhận email?", "Thanh toán chưa vào?", "Bao giờ bắt đầu?")
+4. **Support** — custom block: liên hệ
+
+Block order:
+- hero
+- timeline (3 steps)
+- faq-accordion
+- custom (support contact)
+
+Tone: rõ ràng, professional, giúp user biết chính xác họ cần làm gì tiếp.`
+  },
+  {
+    key: 'thank-you-upsell',
+    name: 'Thank You + Upsell nhẹ',
+    description: 'Cảm ơn + one-time offer bổ sung (bonus, add-on, membership).',
+    sort_order: 220, page_type_filter: ['thank-you'],
+    system_prompt: `Formula: Thank You + Soft Upsell
+
+Bạn generate block outline cho THANK YOU PAGE có soft upsell (không aggressive).
+
+Cấu trúc:
+1. **Hero** — Cảm ơn ngắn
+2. **Confirmation** — custom block: xác nhận email/delivery
+3. **Special one-time offer** — bonus-stack HOẶC pricing-single:
+   - "Nhân dịp bạn vừa mua, đây là 1 ưu đãi đặc biệt CHỈ HÔM NAY"
+   - Product bổ sung (add-on, workshop, community access)
+   - Giá discount rõ ràng
+4. **CTA** — cta-simple: "Thêm vào đơn" hoặc "Thanh toán riêng"
+5. **Skip option** — custom block: "Không cảm ơn, tôi sẽ dùng ưu đãi này sau"
+
+Block order:
+- hero
+- custom (confirmation)
+- bonus-stack HOẶC pricing-single (upsell offer)
+- cta-simple
+- custom (skip option link)
+
+Tone: thân thiện, không pushy. Upsell là gợi ý, không ép.`
+  },
+  // ═════════════════ Upsell templates ═════════════════
+  {
+    key: 'upsell-oto',
+    name: 'Upsell OTO — One Time Offer',
+    description: 'Wait/scarcity + bonus offer chỉ hiện 1 lần trước khi vào thank-you.',
+    sort_order: 300, page_type_filter: ['upsell'],
+    system_prompt: `Formula: Upsell OTO (One Time Offer)
+
+Bạn generate block outline cho UPSELL PAGE — page hiện SAU khi order, TRƯỚC thank-you, để offer thêm.
+
+Cấu trúc classic OTO:
+1. **Hero pattern interrupt** — Custom block: "KHOAN ĐÓNG TRANG!" hoặc "Trước khi đơn của bạn hoàn tất, đọc kỹ điều này":
+   - Xác nhận đơn đã ghi nhận
+   - "Bạn có 1 cơ hội đặc biệt CHỈ XUẤT HIỆN 1 LẦN trên trang này"
+2. **Offer reveal** — solution-reveal + hero visual:
+   - Sản phẩm bổ sung (khóa nâng cao, 1-1 session, workshop)
+   - Lý do nó value cho customer đã mua sản phẩm gốc
+3. **Value stack** — bonus-stack: gì họ nhận thêm
+4. **Special price** — pricing-single với anchor rõ:
+   - Giá gốc: X đ
+   - Giá TRÊN TRANG NÀY DUY NHẤT: Y đ (chiết khấu Z%)
+5. **Urgency** — countdown hoặc scarcity-list: "Trang này biến mất trong 15 phút"
+6. **CTA + Skip** — cta-simple "Có, thêm vào đơn ngay" + smaller link "Không, tôi hài lòng với đơn hiện tại"
+
+Block order:
+- custom (pattern interrupt)
+- solution-reveal
+- feature-benefit
+- bonus-stack
+- pricing-single
+- countdown (optional)
+- cta-simple + custom (skip link)
+
+Tone: khẩn trương nhưng không lừa. Skip option PHẢI có để không bị coi là dark pattern.`
+  },
 ]
 
 async function upsertFormula(f) {
@@ -229,6 +395,7 @@ async function upsertFormula(f) {
   const payload = {
     key: f.key, name: f.name, description: f.description,
     system_prompt: f.system_prompt,
+    page_type_filter: f.page_type_filter || null,
     is_builtin: true, is_active: true, sort_order: f.sort_order,
     updated_at: new Date().toISOString(),
   }

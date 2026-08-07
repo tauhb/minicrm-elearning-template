@@ -248,14 +248,16 @@ export async function composeBlockRenderPrompts(input: ComposeBlockRenderInput):
  */
 export function buildHtmlShell(opts: {
   title: string
+  description?: string
   style: StyleInstructions
-  bodyContent: string   // concatenated block HTMLs
+  bodyContent: string
 }): string {
   const font = opts.style.fontPair || 'Inter+Playfair Display'
   const fontLinks = fontPairToGoogleFontsHref(font)
   const bodyFont = fontFamily(font, 'body')
   const headingFont = fontFamily(font, 'heading')
   const brand = opts.style.brandColor || '#B6FF00'
+  const desc = opts.description?.trim()
 
   return `<!DOCTYPE html>
 <html lang="vi">
@@ -263,6 +265,10 @@ export function buildHtmlShell(opts: {
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>${escapeHtml(opts.title)}</title>
+${desc ? `<meta name="description" content="${escapeHtml(desc)}">` : ''}
+${desc ? `<meta property="og:description" content="${escapeHtml(desc)}">` : ''}
+<meta property="og:title" content="${escapeHtml(opts.title)}">
+<meta property="og:type" content="website">
 <script src="https://cdn.tailwindcss.com"></script>
 ${fontLinks}
 <style>

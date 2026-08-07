@@ -254,7 +254,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       const bodyContent = htmlBlocks.map(b => b?.html || '').join('\n\n')
       const errors = htmlBlocks.filter(b => b?.error).map(b => b.error!)
-      let html = buildHtmlShell({ title: step.name, style, bodyContent })
+      let html = buildHtmlShell({
+        title: step.page_title || step.name,
+        description: step.page_description || undefined,
+        style, bodyContent,
+      })
       html = injectFormHiddens(html, step.funnel_id, id)
 
       const totalUsage = htmlBlocks.reduce((acc, b) => {
@@ -336,7 +340,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
 
       const bodyContent = existingBlocks.map(b => b?.html || '').join('\n\n')
-      let html = buildHtmlShell({ title: step.name, style, bodyContent })
+      let html = buildHtmlShell({
+        title: step.page_title || step.name,
+        description: step.page_description || undefined,
+        style, bodyContent,
+      })
       html = injectFormHiddens(html, step.funnel_id, id)
 
       draft.blocks[blockIndex] = block
@@ -408,7 +416,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       })
 
       const bodyContent = updatedBlocks.map(b => b?.html || '').join('\n\n')
-      let html = buildHtmlShell({ title: step.name, style, bodyContent })
+      let html = buildHtmlShell({
+        title: step.page_title || step.name,
+        description: step.page_description || undefined,
+        style, bodyContent,
+      })
       html = injectFormHiddens(html, step.funnel_id, id)
 
       await admin.from('funnel_steps').update({
@@ -578,6 +590,8 @@ KHÔNG wrap markdown code fence. Chỉ pure JSON. Tiếng Việt, dùng "bạn".
     }
     if (body.render_instructions !== undefined) payload.render_instructions = body.render_instructions
     if (body.copy_draft !== undefined) payload.copy_draft = body.copy_draft
+    if (body.page_title !== undefined) payload.page_title = body.page_title || null
+    if (body.page_description !== undefined) payload.page_description = body.page_description || null
     if (body.id) {
       const { data, error } = await admin.from('funnel_steps').update(payload).eq('id', body.id).select().single()
       if (error) return res.status(500).json({ error: error.message })
