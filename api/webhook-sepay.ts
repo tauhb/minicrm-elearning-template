@@ -1,14 +1,19 @@
 // api/webhook-sepay.ts — LEGACY Vercel Serverless Function.
 // Kept only for backward compatibility: existing SePay accounts may still POST here.
-// NEW installs should point SePay at /api/f/sepay-webhook (funnel-aware, has idempotency,
-// creates funnel_orders + payments in one flow).
-// Wave 1 Track B will unify both endpoints; do not delete until then.
+// NEW installs should point SePay at /api/f/sepay-webhook (funnel-aware, has richer
+// idempotency + lead sync).
 // URL: https://your-portal.vercel.app/api/webhook-sepay
+//
+// Wave 1 Track B: idempotency hardened to match /api/f/sepay-webhook.
+//   - `.single()` on the "existing payment" lookup was throwing when 0 rows matched
+//     and never actually short-circuiting. Switched to `.maybeSingle()`.
+//   - Partial UNIQUE index payments(gateway, gateway_ref) is now the DB-level
+//     backstop (migration 016) — we detect the 23505 code and return 200.
 
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { createClient } from '@supabase/supabase-js'
 
-// Admin client — dùng service_role key, chỉ chạy server-side
+// Admin client — service_role key, server-side only.
 const getAdminClient = () => createClient(
   process.env.VITE_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!,
@@ -16,7 +21,7 @@ const getAdminClient = () => createClient(
 )
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  // SePay gửi POST
+  // SePay sends POST
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' })
   }
@@ -32,14 +37,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     .single()
 
   try {
-    // 2. Chỉ xử lý tiền vào (không xử lý tiền ra)
+    // 2. Only process incoming transfers
     if (payload.transferType !== 'in') {
       await supabase.from('webhook_events').update({ processed: true }).eq('id', event?.id)
       return res.json({ received: true, skipped: 'not incoming' })
     }
 
-    // 3. Parse email + slug (course/product) từ description
-    // Format SePay khuyến nghị: "THANHTOAN <slug> <email>" hoặc "THANHTOAN-K1 <email>" (legacy)
+    // 3. Parse email + slug (course/product) from description
+    // SePay-recommended format: "THANHTOAN <slug> <email>" or "THANHTOAN-K1 <email>" (legacy)
     const description: string = payload.description || payload.content || ''
     const emailMatch = description.match(/[\w.+-]+@[\w-]+\.\w+/)
     if (!emailMatch) {
@@ -48,7 +53,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
     const email = emailMatch[0].toLowerCase()
 
-    // Trích slug candidate (token còn lại sau khi bỏ THANHTOAN + email)
+    // Extract slug candidate (token remaining after stripping THANHTOAN + email)
     const tokens = description
       .replace(/THANHTOAN/i, '')
       .replace(emailMatch[0], '')
@@ -57,7 +62,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .filter(Boolean)
     const slugCandidate = tokens.length > 0 ? tokens.join('-').toLowerCase() : null
 
-    // Lookup course/product theo slug
+    // Lookup course/product by slug
     let courseId: string | null = null
     let productId: string | null = null
     if (slugCandidate) {
@@ -70,7 +75,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
-    // Fallback: nếu slug match pattern K\d+ (legacy cohort) → match default course với cohort đó
+    // Fallback: legacy cohort code K\d+
     let cohort: string | null = null
     if (!courseId && !productId) {
       const upper = (slugCandidate || '').toUpperCase()
@@ -83,29 +88,34 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const ref = payload.referenceCode || payload.transactionID || ''
 
-    // 4. Idempotency — không xử lý trùng
-    const { data: existing } = await supabase
-      .from('payments')
-      .select('id')
-      .eq('gateway_ref', ref)
-      .single()
-    if (existing) {
-      return res.json({ received: true, skipped: 'duplicate', ref })
+    // 4. Idempotency — application-level guard (Track B fix: .maybeSingle so no
+    //    exception when 0 rows). DB-level partial UNIQUE index on
+    //    (gateway, gateway_ref) is the belt-and-suspenders backstop.
+    if (ref) {
+      const { data: existing } = await supabase
+        .from('payments')
+        .select('id')
+        .eq('gateway', 'sepay')
+        .eq('gateway_ref', ref)
+        .maybeSingle()
+      if (existing) {
+        await supabase.from('webhook_events').update({ processed: true, error: 'duplicate' }).eq('id', event?.id)
+        return res.json({ received: true, skipped: 'duplicate', ref })
+      }
     }
 
-    // 5. Kiểm tra user đã tồn tại chưa
+    // 5. Check if user already exists
     const { data: users } = await supabase.auth.admin.listUsers()
     const existingUser = (users?.users ?? []).find((u: { email?: string }) => u.email === email)
     let userId: string
 
     if (existingUser) {
-      // User đã có — chỉ cập nhật payment_status
       userId = existingUser.id
       await supabase.from('customers')
         .update({ payment_status: 'paid', payment_ref: ref })
         .eq('id', userId)
     } else {
-      // 6. Tạo user mới
+      // 6. Create user
       const tempPass = `${Math.random().toString(36).slice(-8)}Aa1!`
       const { data: newUser, error: createErr } = await supabase.auth.admin.createUser({
         email,
@@ -118,7 +128,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
       userId = newUser.user.id
 
-      // 7. Tạo customer profile (cohort/start_date không còn — đã chuyển sang customer_courses)
+      // 7. Create customer profile
       await supabase.from('customers').insert({
         id: userId,
         email,
@@ -128,7 +138,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         payment_ref: ref,
       })
 
-      // 8. Gửi magic link để học viên đặt mật khẩu
+      // 8. Magic link to set password
       const siteUrl = process.env.VERCEL_URL
         ? `https://${process.env.VERCEL_URL}`
         : (process.env.SITE_URL || 'https://your-portal.vercel.app')
@@ -139,7 +149,33 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       })
     }
 
-    // 9. Enrollment nếu là course
+    // 8b. Lead sync — mirror /api/f/sepay-webhook behavior so legacy path also
+    //     credits the originating lead + writes a care_history note.
+    try {
+      const { data: lead } = await supabase.from('leads')
+        .select('id, converted_to')
+        .eq('email', email)
+        .limit(1)
+        .maybeSingle()
+      if (lead && !lead.converted_to) {
+        await supabase.from('leads').update({
+          converted_at: new Date().toISOString(),
+          converted_to: userId,
+        }).eq('id', lead.id)
+        await supabase.from('care_history').insert({
+          lead_id: lead.id,
+          type: 'note',
+          content: 'Chuyển đổi thành Khách hàng qua SePay webhook (legacy endpoint)',
+          kind: 'care_log',
+          status: 'done',
+        })
+      }
+    } catch (leadErr) {
+      // Non-blocking
+      console.warn('Lead sync error (legacy webhook):', leadErr)
+    }
+
+    // 9. Enrollment if course
     let enrollmentId: string | null = null
     if (courseId) {
       const today = new Date().toISOString().split('T')[0]
@@ -153,7 +189,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       enrollmentId = enr?.id || null
     }
 
-    // 10. Grant nếu là digital product
+    // 10. Grant if digital product
     if (productId) {
       await supabase.from('customer_products').upsert({
         customer_id: userId,
@@ -161,8 +197,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }, { onConflict: 'customer_id,product_id' })
     }
 
-    // 11. Ghi payment record
-    const { data: paymentRecord } = await supabase.from('payments').insert({
+    // 11. Write payment record.
+    //     Belt-and-suspenders: if the unique index (gateway, gateway_ref) rejects
+    //     this insert (race lost), treat as duplicate and return 200.
+    const { data: paymentRecord, error: paymentErr } = await supabase.from('payments').insert({
       student_id     : userId,
       amount         : payload.transferAmount || 0,
       currency       : 'VND',
@@ -175,15 +213,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       product_id     : productId,
     }).select('id').single()
 
+    if (paymentErr) {
+      const code = (paymentErr as any).code
+      if (code === '23505') {
+        await supabase.from('webhook_events').update({ processed: true, error: 'duplicate (unique index)' }).eq('id', event?.id)
+        return res.json({ received: true, skipped: 'duplicate-race', ref })
+      }
+      throw paymentErr
+    }
+
     // 11b. Affiliate attribution — LAST-CLICK, 30-day window
-    // Ưu tiên REF token trong description (click cuối ngay trước khi mua)
-    // Fallback: lead utm_campaign (first-click, khi visitor opt-in xa trước đó)
     try {
       const refFromDescription = tokens.find(t => t.toUpperCase().startsWith('REF-'))?.replace(/REF-/i, '').toUpperCase()
 
       let refCode = refFromDescription || null
       if (!refCode) {
-        // Fallback: lookup utm trong leads
+        // Fallback: lookup utm in leads
         const { data: lead } = await supabase
           .from('leads')
           .select('utm_source, utm_campaign')
@@ -198,12 +243,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const { data: affiliate } = await supabase
           .from('affiliates')
           .select('id, commission_rate, commission_type, fixed_amount')
-          .eq('referral_code', refCode) // refCode đã uppercase phía trên
+          .eq('referral_code', refCode)
           .eq('status', 'approved')
           .maybeSingle()
 
         if (affiliate) {
-          // Find latest valid click (last-click attribution, 30-day window)
           const { data: click } = await supabase
             .from('affiliate_clicks')
             .select('id, click_id')
@@ -219,7 +263,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             ? (affiliate.fixed_amount || 0)
             : Math.round(saleAmount * (affiliate.commission_rate / 100))
 
-          // Create conversion
           const { data: conversion } = await supabase
             .from('affiliate_conversions')
             .insert({
@@ -235,7 +278,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             .select('id')
             .single()
 
-          // Create commission (30-day hold)
           if (conversion) {
             await supabase.from('affiliate_commissions').insert({
               affiliate_id:     affiliate.id,
@@ -246,7 +288,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             })
           }
 
-          // Mark click as converted
           if (click) {
             await supabase
               .from('affiliate_clicks')
@@ -256,7 +297,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
       }
     } catch (affiliateErr) {
-      // Affiliate attribution lỗi không ảnh hưởng payment flow
+      // Affiliate attribution errors don't affect the payment flow
       console.error('Affiliate attribution error:', affiliateErr)
     }
 
