@@ -3,8 +3,10 @@ import {
   Users, Bell, DollarSign, Activity,
   Phone, FileText, Mail, AlertCircle,
   BarChart2, GitBranch, TrendingUp, TrendingDown, Minus,
+  Square, ArrowRight,
 } from 'lucide-react'
-import { fetchDashboardStats, fetchRecentActivity } from '../../services/api'
+import { Link } from 'react-router-dom'
+import { fetchDashboardStats, fetchRecentActivity, completeTask } from '../../services/api'
 import { DashboardStats } from '../../types'
 import { formatDistanceToNow, format } from 'date-fns'
 import { vi } from 'date-fns/locale'
@@ -16,7 +18,12 @@ type TimeRange = '7d' | '30d' | '3m' | 'year'
 
 interface FollowUp {
   id: string
-  next_follow_up_date: string
+  kind?: 'care_log' | 'task'
+  title?: string | null
+  status?: 'open' | 'done' | 'cancelled'
+  priority?: 'low' | 'medium' | 'high'
+  due_at?: string | null                // task-only (TIMESTAMPTZ)
+  next_follow_up_date?: string | null   // care_log-only (DATE)
   type: string
   content: string
   lead?: { name: string; email: string; phone: string } | null
@@ -250,17 +257,31 @@ const Dashboard: React.FC = () => {
     const load = async () => {
       setWidgetsLoading(true)
 
+      // Tasks lookahead: 7 days out, plus overdue + no-due-date
+      const weekAhead = new Date(Date.now() + 7 * 86400000).toISOString()
+
       const [
-        followUpRes, stagesRes, pipelineLeadsRes,
+        openTasksRes, legacyFollowUpRes, stagesRes, pipelineLeadsRes,
         leadsSourceRes, totalLeadsRes,
         newStudRes, prevStudRes,
         newLeadsRes, prevLeadsRes,
         periodRevRes, prevRevRes,
       ] = await Promise.all([
-        // Follow-ups (always real-time)
+        // NEW: open tasks (kind='task') due within 7 days OR without a due date
         supabase
           .from('care_history')
           .select('*, lead:leads(name,email,phone), customer:customers!care_history_customer_id_fkey(display_name,email)')
+          .eq('kind', 'task')
+          .eq('status', 'open')
+          .or(`due_at.lte.${weekAhead},due_at.is.null`)
+          .order('due_at', { ascending: true, nullsFirst: false })
+          .limit(10),
+
+        // LEGACY: care_log rows with next_follow_up_date <= today (backward compat)
+        supabase
+          .from('care_history')
+          .select('*, lead:leads(name,email,phone), customer:customers!care_history_customer_id_fkey(display_name,email)')
+          .eq('kind', 'care_log')
           .lte('next_follow_up_date', today)
           .not('next_follow_up_date', 'is', null)
           .order('next_follow_up_date', { ascending: true })
@@ -300,7 +321,10 @@ const Dashboard: React.FC = () => {
           .eq('status', 'completed').gte('created_at', bounds.prevStart).lt('created_at', bounds.prevEnd),
       ])
 
-      setFollowUps((followUpRes.data as FollowUp[]) ?? [])
+      // Merge tasks + legacy care_log follow-ups. Tasks come first (they own the future).
+      const tasksData = (openTasksRes.data as FollowUp[]) ?? []
+      const legacyData = (legacyFollowUpRes.data as FollowUp[]) ?? []
+      setFollowUps([...tasksData, ...legacyData].slice(0, 15))
 
       const stagesData = (stagesRes.data as PipelineStage[]) ?? []
       setPipelineStages(stagesData)
@@ -342,7 +366,12 @@ const Dashboard: React.FC = () => {
     load()
   }, [timeRange])
 
-  const overdueCount  = followUps.filter(f => f.next_follow_up_date < today).length
+  // Overdue = tasks past due_at OR legacy care_log with next_follow_up_date < today
+  const nowIso = new Date().toISOString()
+  const overdueCount = followUps.filter(f => {
+    if (f.kind === 'task') return f.status === 'open' && f.due_at && f.due_at < nowIso
+    return !!(f.next_follow_up_date && f.next_follow_up_date < today)
+  }).length
   const pipelineTotal = Object.values(stageCounts).reduce((a, b) => a + b, 0)
   const maxStageCount = Math.max(...Object.values(stageCounts), 1)
   const loading       = coreLoading || widgetsLoading
@@ -437,52 +466,88 @@ const Dashboard: React.FC = () => {
               ))}
             </div>
           ) : (
-            <div className="divide-y" style={{ borderColor: 'var(--theme-border)' }}>
-              {followUps.map(item => {
-                const isOverdue = item.next_follow_up_date < today
-                const name  = item.lead?.name || item.customer?.display_name || item.lead?.email || item.customer?.email || 'Không xác định'
-                const phone = item.lead?.phone || ''
+            <>
+              <div className="divide-y" style={{ borderColor: 'var(--theme-border)' }}>
+                {followUps.map(item => {
+                  const isTask = item.kind === 'task'
+                  const isOverdue = isTask
+                    ? !!(item.due_at && item.due_at < nowIso)
+                    : !!(item.next_follow_up_date && item.next_follow_up_date < today)
+                  const name  = item.lead?.name || item.customer?.display_name || item.lead?.email || item.customer?.email || 'Không xác định'
+                  const phone = item.lead?.phone || ''
+                  const primary = isTask
+                    ? (item.title || item.content || '(Không có tiêu đề)')
+                    : name
+                  const secondary = isTask ? name : item.content
 
-                return (
-                  <div key={item.id}
-                    className="flex items-center gap-4 px-6 py-3.5 group transition-colors"
-                    style={{ background: 'var(--theme-surface)' }}
-                    onMouseEnter={e => (e.currentTarget.style.background = 'var(--theme-surface-2)')}
-                    onMouseLeave={e => (e.currentTarget.style.background = 'var(--theme-surface)')}
-                  >
-                    <div className="w-8 h-8 rounded-lg border flex items-center justify-center shrink-0"
-                      style={{ background: 'var(--theme-surface-2)', borderColor: 'var(--theme-border)', color: 'var(--theme-text-muted)' }}>
-                      {TYPE_ICON[item.type] ?? <FileText size={13} />}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold truncate" style={{ color: 'var(--theme-text)' }}>{name}</p>
-                      {item.content && <p className="text-xs truncate mt-0.5" style={{ color: 'var(--theme-text-muted)' }}>{item.content}</p>}
-                    </div>
-                    <span className="text-xs px-2 py-0.5 rounded border font-medium shrink-0"
-                      style={{
-                        color:       isOverdue ? '#f87171' : '#fbbf24',
-                        borderColor: isOverdue ? 'rgba(248,113,113,0.3)' : 'rgba(251,191,36,0.3)',
-                        background:  isOverdue ? 'rgba(248,113,113,0.08)' : 'rgba(251,191,36,0.08)',
-                      }}>
-                      {isOverdue ? `Quá hạn ${item.next_follow_up_date}` : 'Hôm nay'}
-                    </span>
-                    <div className="flex gap-1.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-                      {phone && (
-                        <a href={`tel:${phone}`}
-                          className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border"
-                          style={{ background: 'var(--theme-surface-3)', borderColor: 'var(--theme-border)', color: 'var(--theme-text-muted)' }}>
-                          <Phone size={11} />Gọi
-                        </a>
+                  const dueLabel = isTask
+                    ? (item.due_at ? format(new Date(item.due_at), 'dd/MM · HH:mm', { locale: vi }) : 'Không hạn')
+                    : (isOverdue ? `Quá hạn ${item.next_follow_up_date}` : 'Hôm nay')
+
+                  const handleComplete = async () => {
+                    if (!isTask) return
+                    try {
+                      await completeTask(item.id)
+                      setFollowUps(prev => prev.filter(f => f.id !== item.id))
+                    } catch (e) { console.error(e) }
+                  }
+
+                  return (
+                    <div key={item.id}
+                      className="flex items-center gap-4 px-6 py-3.5 group transition-colors"
+                      style={{ background: 'var(--theme-surface)' }}
+                      onMouseEnter={e => (e.currentTarget.style.background = 'var(--theme-surface-2)')}
+                      onMouseLeave={e => (e.currentTarget.style.background = 'var(--theme-surface)')}
+                    >
+                      {isTask ? (
+                        <button
+                          onClick={handleComplete}
+                          className="shrink-0 transition-colors"
+                          title="Đánh dấu hoàn thành"
+                        >
+                          <Square size={16} className="text-gray-500 hover:text-white" />
+                        </button>
+                      ) : (
+                        <div className="w-8 h-8 rounded-lg border flex items-center justify-center shrink-0"
+                          style={{ background: 'var(--theme-surface-2)', borderColor: 'var(--theme-border)', color: 'var(--theme-text-muted)' }}>
+                          {TYPE_ICON[item.type] ?? <FileText size={13} />}
+                        </div>
                       )}
-                      <button className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border"
-                        style={{ background: 'var(--theme-surface-3)', borderColor: 'var(--theme-border)', color: 'var(--theme-text-muted)' }}>
-                        <FileText size={11} />Ghi chú
-                      </button>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold truncate" style={{ color: 'var(--theme-text)' }}>{primary}</p>
+                        {secondary && <p className="text-xs truncate mt-0.5" style={{ color: 'var(--theme-text-muted)' }}>{secondary}</p>}
+                      </div>
+                      <span className="text-xs px-2 py-0.5 rounded border font-medium shrink-0"
+                        style={{
+                          color:       isOverdue ? '#f87171' : '#fbbf24',
+                          borderColor: isOverdue ? 'rgba(248,113,113,0.3)' : 'rgba(251,191,36,0.3)',
+                          background:  isOverdue ? 'rgba(248,113,113,0.08)' : 'rgba(251,191,36,0.08)',
+                        }}>
+                        {isOverdue && isTask ? `Quá hạn · ${dueLabel}` : dueLabel}
+                      </span>
+                      <div className="flex gap-1.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                        {phone && (
+                          <a href={`tel:${phone}`}
+                            className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border"
+                            style={{ background: 'var(--theme-surface-3)', borderColor: 'var(--theme-border)', color: 'var(--theme-text-muted)' }}>
+                            <Phone size={11} />Gọi
+                          </a>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                )
-              })}
-            </div>
+                  )
+                })}
+              </div>
+              <div className="px-6 py-3 border-t flex items-center justify-end" style={{ borderColor: 'var(--theme-border)' }}>
+                <Link
+                  to="/admin/tasks"
+                  className="flex items-center gap-1 text-xs font-medium transition-colors"
+                  style={{ color: 'var(--color-mission-accent)' }}
+                >
+                  Xem tất cả tasks<ArrowRight size={11} />
+                </Link>
+              </div>
+            </>
           )}
         </div>
       )}

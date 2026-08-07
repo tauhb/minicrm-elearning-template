@@ -455,6 +455,129 @@ export const fetchUpcomingFollowUps = async (): Promise<CareHistory[]> => {
   return data || []
 }
 
+// --- CRM TASKS (kind='task' rows in care_history) ---
+
+async function authHeader(): Promise<HeadersInit> {
+  const { data: { session } } = await supabase.auth.getSession()
+  if (!session) throw new Error('Phiên đăng nhập đã hết hạn')
+  return {
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${session.access_token}`,
+  }
+}
+
+export interface TaskFilters {
+  status?: 'open' | 'done' | 'cancelled' | 'all'
+  assignee?: string     // 'me' | user_id | 'unassigned'
+  lead_id?: string
+  customer_id?: string
+  due_before?: string
+  overdue?: boolean
+}
+
+export const fetchTasks = async (filters: TaskFilters = {}): Promise<CareHistory[]> => {
+  const params = new URLSearchParams()
+  if (filters.status)     params.set('status', filters.status)
+  if (filters.assignee)   params.set('assignee', filters.assignee)
+  if (filters.lead_id)    params.set('lead_id', filters.lead_id)
+  if (filters.customer_id) params.set('customer_id', filters.customer_id)
+  if (filters.due_before) params.set('due_before', filters.due_before)
+  if (filters.overdue)    params.set('overdue', 'true')
+  const res = await fetch(`/api/tasks?${params.toString()}`, { headers: await authHeader() })
+  const json = await res.json()
+  if (!res.ok) throw new Error(json.error || 'Load tasks lỗi')
+  return json.tasks || []
+}
+
+export interface CreateTaskInput {
+  title: string
+  description?: string
+  due_at?: string | null
+  priority?: 'low' | 'medium' | 'high'
+  type?: CareHistoryType
+  lead_id?: string | null
+  customer_id?: string | null
+  order_id?: string | null
+  assigned_to?: string | null
+}
+
+export const createTask = async (input: CreateTaskInput): Promise<CareHistory> => {
+  const res = await fetch('/api/tasks', {
+    method: 'POST',
+    headers: await authHeader(),
+    body: JSON.stringify(input),
+  })
+  const json = await res.json()
+  if (!res.ok) throw new Error(json.error || 'Tạo task thất bại')
+  return json.task
+}
+
+export const updateTask = async (id: string, patch: Partial<CreateTaskInput>): Promise<CareHistory> => {
+  const res = await fetch(`/api/tasks?action=update&id=${id}`, {
+    method: 'POST',
+    headers: await authHeader(),
+    body: JSON.stringify(patch),
+  })
+  const json = await res.json()
+  if (!res.ok) throw new Error(json.error || 'Update task thất bại')
+  return json.task
+}
+
+export const completeTask = async (id: string): Promise<CareHistory> => {
+  const res = await fetch(`/api/tasks?action=complete&id=${id}`, {
+    method: 'POST',
+    headers: await authHeader(),
+  })
+  const json = await res.json()
+  if (!res.ok) throw new Error(json.error || 'Đánh dấu hoàn thành lỗi')
+  return json.task
+}
+
+export const reopenTask = async (id: string): Promise<CareHistory> => {
+  const res = await fetch(`/api/tasks?action=reopen&id=${id}`, {
+    method: 'POST',
+    headers: await authHeader(),
+  })
+  const json = await res.json()
+  if (!res.ok) throw new Error(json.error || 'Mở lại task lỗi')
+  return json.task
+}
+
+export const cancelTask = async (id: string): Promise<CareHistory> => {
+  const res = await fetch(`/api/tasks?action=cancel&id=${id}`, {
+    method: 'POST',
+    headers: await authHeader(),
+  })
+  const json = await res.json()
+  if (!res.ok) throw new Error(json.error || 'Huỷ task lỗi')
+  return json.task
+}
+
+export const deleteTask = async (id: string): Promise<void> => {
+  const res = await fetch(`/api/tasks?id=${id}`, {
+    method: 'DELETE',
+    headers: await authHeader(),
+  })
+  const json = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(json.error || 'Xoá task lỗi')
+}
+
+export interface AssignableUser {
+  id: string
+  display_name: string
+  email: string
+  role: string
+}
+
+export const fetchAssignableUsers = async (): Promise<AssignableUser[]> => {
+  const { data } = await supabase
+    .from('customers')
+    .select('id, display_name, email, role')
+    .in('role', ['owner', 'admin', 'sales', 'support'])
+    .order('display_name', { ascending: true })
+  return (data as AssignableUser[]) || []
+}
+
 // --- COURSES ---
 
 export const fetchCourses = async (): Promise<Course[]> => {

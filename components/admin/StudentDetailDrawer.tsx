@@ -4,6 +4,7 @@ import { Profile, Payment } from '../../types'
 import { updateProfile, fetchPayments } from '../../services/api'
 import CareHistoryTab from './CareHistoryTab'
 import EnrollmentsTab from './EnrollmentsTab'
+import TasksTab from './TasksTab'
 
 interface Props {
   student: Profile
@@ -17,7 +18,7 @@ const StudentDetailDrawer: React.FC<Props> = ({ student, onClose, onUpdate }) =>
   const [newTag, setNewTag] = useState('')
   const [payments, setPayments] = useState<Payment[]>([])
   const [saving, setSaving] = useState(false)
-  const [activeTab, setActiveTab] = useState<'info' | 'care' | 'courses'>('info')
+  const [activeTab, setActiveTab] = useState<'info' | 'care' | 'tasks' | 'courses'>('info')
 
   useEffect(() => {
     fetchPayments(student.id).then(setPayments)
@@ -72,11 +73,12 @@ const StudentDetailDrawer: React.FC<Props> = ({ student, onClose, onUpdate }) =>
           {[
             { key: 'info', label: 'Thông tin' },
             { key: 'care', label: 'Lịch sử CS' },
+            { key: 'tasks', label: 'Tasks' },
             { key: 'courses', label: 'Khóa học' },
           ].map(tab => (
             <button
               key={tab.key}
-              onClick={() => setActiveTab(tab.key as 'info' | 'care' | 'courses')}
+              onClick={() => setActiveTab(tab.key as 'info' | 'care' | 'tasks' | 'courses')}
               className={`px-4 py-3 text-xs font-medium border-b-2 transition-all ${activeTab === tab.key ? 'border-current' : 'border-transparent text-gray-500 hover:text-white'}`}
               style={activeTab === tab.key ? { color: 'var(--color-mission-accent)', borderColor: 'var(--color-mission-accent)' } : {}}
             >
@@ -169,6 +171,11 @@ const StudentDetailDrawer: React.FC<Props> = ({ student, onClose, onUpdate }) =>
           {/* CARE HISTORY TAB */}
           {activeTab === 'care' && (
             <CareHistoryTab customerId={student.id} />
+          )}
+
+          {/* TASKS TAB */}
+          {activeTab === 'tasks' && (
+            <TasksTab customerId={student.id} />
           )}
 
           {/* COURSES TAB */}
