@@ -64,18 +64,38 @@ async function api<T = any>(path: string, opts: RequestInit = {}): Promise<T> {
   return data as T
 }
 
-export function AddBlockModal({ stepId, onClose, onAdd }: {
+export function AddBlockModal({ stepId, existingBlocks, onClose, onAdd }: {
   stepId: string
+  existingBlocks?: Array<{ kind: string; content: any }>   // For AI context
   onClose: () => void
   onAdd: (block: Block) => void
 }) {
   const [customIntent, setCustomIntent] = useState('')
   const [generating, setGenerating] = useState(false)
+  const [generatingKind, setGeneratingKind] = useState<string | null>(null)
+  const [autoFill, setAutoFill] = useState(true)   // Default ON
   const [error, setError] = useState<string | null>(null)
 
-  const pickKnown = (item: CatalogItem) => {
-    onAdd({ kind: item.kind, content: JSON.parse(JSON.stringify(item.defaultContent)) })
-    onClose()
+  const pickKnown = async (item: CatalogItem) => {
+    if (!autoFill) {
+      onAdd({ kind: item.kind, content: JSON.parse(JSON.stringify(item.defaultContent)) })
+      onClose()
+      return
+    }
+    // Auto-fill via AI
+    setError(null); setGeneratingKind(item.kind)
+    try {
+      const r = await api<{ block: Block }>(`/api/funnel-steps?action=generate-block&id=${stepId}`, {
+        method: 'POST',
+        body: JSON.stringify({
+          intent: '',
+          hint_kind: item.kind,
+          context_blocks: existingBlocks || [],
+        }),
+      })
+      onAdd(r.block)
+      onClose()
+    } catch (e: any) { setError(e.message); setGeneratingKind(null) }
   }
 
   const generateCustom = async () => {
@@ -84,7 +104,11 @@ export function AddBlockModal({ stepId, onClose, onAdd }: {
     try {
       const r = await api<{ block: Block }>(`/api/funnel-steps?action=generate-block&id=${stepId}`, {
         method: 'POST',
-        body: JSON.stringify({ intent: customIntent, hint_kind: 'custom' }),
+        body: JSON.stringify({
+          intent: customIntent,
+          hint_kind: 'custom',
+          context_blocks: existingBlocks || [],
+        }),
       })
       onAdd(r.block)
       onClose()
@@ -103,26 +127,49 @@ export function AddBlockModal({ stepId, onClose, onAdd }: {
         </div>
 
         <div className="p-5 space-y-6 max-h-[70vh] overflow-y-auto">
+          {/* Auto-fill toggle */}
+          <div className="flex items-center justify-between p-3 bg-neutral-950 border border-neutral-800 rounded-lg">
+            <div>
+              <label className="text-sm font-medium flex items-center gap-2">
+                <Sparkles className="w-4 h-4" style={{ color: 'var(--color-mission-accent)' }} />
+                Auto-fill với AI
+              </label>
+              <p className="text-[10px] text-neutral-500 mt-0.5">
+                Click block → AI đọc funnel context + {existingBlocks?.length || 0} blocks hiện có → generate content
+              </p>
+            </div>
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input type="checkbox" checked={autoFill} onChange={e => setAutoFill(e.target.checked)} className="sr-only peer" />
+              <div className="w-10 h-5 bg-neutral-700 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all"
+                   style={autoFill ? { background: 'var(--color-mission-accent)' } : undefined}></div>
+            </label>
+          </div>
+
           {/* Known types */}
           <div>
-            <h3 className="text-sm font-semibold mb-3 text-neutral-400">Chọn loại block</h3>
+            <h3 className="text-sm font-semibold mb-3 text-neutral-400">Chọn loại block {autoFill && '(AI sẽ auto-fill content)'}</h3>
             <div className="space-y-4">
               {GROUPS.map(group => (
                 <div key={group}>
                   <h4 className="text-[10px] text-neutral-500 uppercase tracking-wider mb-2">{group}</h4>
                   <div className="grid grid-cols-3 gap-2">
-                    {CATALOG.filter(c => c.group === group).map(item => (
-                      <button key={item.kind} onClick={() => pickKnown(item)}
-                        className="text-left px-3 py-2 rounded-lg border border-neutral-800 hover:border-primary hover:bg-neutral-800/50 transition"
-                        style={{ borderColor: 'transparent' }}
-                        onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--color-mission-accent)' }}
-                        onMouseLeave={e => { e.currentTarget.style.borderColor = '' }}>
-                        <div className="text-xs font-medium flex items-center gap-1">
-                          <span>{item.emoji}</span> {item.label}
-                        </div>
-                        <div className="text-[10px] text-neutral-500 mt-0.5">{item.desc}</div>
-                      </button>
-                    ))}
+                    {CATALOG.filter(c => c.group === group).map(item => {
+                      const isGenerating = generatingKind === item.kind
+                      return (
+                        <button key={item.kind} onClick={() => pickKnown(item)}
+                          disabled={!!generatingKind && !isGenerating}
+                          className="text-left px-3 py-2 rounded-lg border border-neutral-800 hover:border-primary hover:bg-neutral-800/50 transition disabled:opacity-40"
+                          style={{ borderColor: 'transparent' }}
+                          onMouseEnter={e => !isGenerating && (e.currentTarget.style.borderColor = 'var(--color-mission-accent)')}
+                          onMouseLeave={e => (e.currentTarget.style.borderColor = '')}>
+                          <div className="text-xs font-medium flex items-center gap-1">
+                            <span>{item.emoji}</span> {item.label}
+                            {isGenerating && <Loader2 className="w-3 h-3 animate-spin ml-auto" />}
+                          </div>
+                          <div className="text-[10px] text-neutral-500 mt-0.5">{item.desc}</div>
+                        </button>
+                      )
+                    })}
                   </div>
                 </div>
               ))}

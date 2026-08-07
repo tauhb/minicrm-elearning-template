@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react'
 import { Sparkles, Plus, Loader2, Eye, Edit2, Trash2, ExternalLink, Send, ChevronLeft, Layers, Wand2, FileCode2, X, Check, ArrowRight, Copy, Save, Zap, ArrowUp, ArrowDown, Settings2, Tag, CreditCard } from 'lucide-react'
 import { supabase } from '../../services/supabase'
 import { StylePicker, StylePreset } from './funnels/StylePicker'
-import { ContentDraftEditor, CopyDraft } from './funnels/ContentDraftEditor'
+import { ContentDraftEditor, CopyDraft, ensureBlockIds, newBlockId } from './funnels/ContentDraftEditor'
 import { PaymentConfigDrawer } from './funnels/PaymentConfigDrawer'
 import { PreviewFlowModal } from './funnels/PreviewFlowModal'
 import { FormFieldsEditor, FormField } from './funnels/FormFieldsEditor'
@@ -735,43 +735,61 @@ function StepEditor({ step, funnel, onSaved }: { step: StepDetail; funnel: Funne
     setMode(step.content_source)
     setFormulaKey(step.copy_formula_key || 'pas')
     setRawInput(step.copy_raw_input || '')
-    setCopyDraft(step.copy_draft || { blocks: [] })
+    // Ensure all blocks have UUIDs (backward compat) — happens on step switch
+    setCopyDraft(ensureBlockIds(step.copy_draft || { blocks: [] }))
     setHasForm(!!step.has_form)
     setFormFields((step.form_fields as any) || [])
     setFormSuccessSlug(step.form_success_step_slug || '')
     setRenderInstructions(step.render_instructions || '')
     setDirtyIndices([])
+    setDirty(false)
     setError(null)
     setTab((step.copy_draft as any)?.blocks?.length ? 'outline' : 'setting')
   }, [step.id])
 
-  // Auto-sync outline → HTML on debounced changes (deterministic text replace, no AI)
+  // Track whether user has unsaved outline changes
+  const [dirty, setDirty] = useState(false)
   useEffect(() => {
-    if (!step.html_blocks?.length) return   // Nothing to sync yet
-    if (JSON.stringify(copyDraft) === JSON.stringify(step.copy_draft)) return
-    const timer = setTimeout(async () => {
-      setSyncing(true)
-      try {
-        const r = await api<{ synced_count: number; dirty_indices: number[] }>(
-          `/api/funnel-steps?action=sync-outline&id=${step.id}`,
-          { method: 'POST', body: JSON.stringify({ copy_draft: copyDraft }) }
-        )
-        setDirtyIndices(r.dirty_indices || [])
-        onSaved()
-      } catch (e: any) { console.error('[sync-outline]', e) }
-      finally { setSyncing(false) }
-    }, 1500)
+    if (JSON.stringify(copyDraft) !== JSON.stringify(step.copy_draft)) setDirty(true)
+    else setDirty(false)
+  }, [copyDraft, step.copy_draft])
+
+  // Sync outline → HTML deterministically (no AI). Triggered on blur, explicit button, or 5s idle fallback.
+  const doSync = async () => {
+    if (!step.html_blocks?.length && !copyDraft.blocks.some(b => b.id)) return
+    if (!dirty) return
+    setSyncing(true)
+    try {
+      const r = await api<{ synced_count: number; dirty_indices: number[] }>(
+        `/api/funnel-steps?action=sync-outline&id=${step.id}`,
+        { method: 'POST', body: JSON.stringify({ copy_draft: copyDraft }) }
+      )
+      setDirtyIndices(r.dirty_indices || [])
+      setDirty(false)
+      onSaved()
+    } catch (e: any) { console.error('[sync-outline]', e); setError(e.message) }
+    finally { setSyncing(false) }
+  }
+
+  // Fallback: sync after 5s idle if user keeps typing without blur
+  useEffect(() => {
+    if (!dirty || syncing) return
+    const timer = setTimeout(doSync, 5000)
     return () => clearTimeout(timer)
-  }, [copyDraft])
+  }, [copyDraft, dirty])
 
   const regenerateBlock = async (blockIndex: number) => {
     setError(null); setRegeneratingIndex(blockIndex)
     try {
+      // First sync outline so html_blocks are ordered correctly (esp after move)
+      if (dirty) await doSync()
+      const block = copyDraft.blocks[blockIndex]
       await api(`/api/funnel-steps?action=regenerate-block&id=${step.id}`, {
         method: 'POST',
         body: JSON.stringify({
           block_index: blockIndex,
-          content: copyDraft.blocks[blockIndex]?.content,
+          content: block?.content,
+          extras: block?.extras,
           render_instructions: renderInstructions,
         }),
       })
@@ -781,8 +799,9 @@ function StepEditor({ step, funnel, onSaved }: { step: StepDetail; funnel: Funne
     finally { setRegeneratingIndex(null) }
   }
 
-  const addBlock = (block: { kind: string; content: any }) => {
-    setCopyDraft(prev => ({ ...prev, blocks: [...(prev.blocks || []), block] }))
+  const addBlock = (block: { kind: string; content: any; extras?: any }) => {
+    const newBlock = { id: newBlockId(), ...block }
+    setCopyDraft(prev => ({ ...prev, blocks: [...(prev.blocks || []), newBlock] }))
   }
 
   const saveFormConfig = async () => {
@@ -1059,16 +1078,37 @@ function StepEditor({ step, funnel, onSaved }: { step: StepDetail; funnel: Funne
                     onChange={setCopyDraft}
                     onAddBlock={() => setAddBlockOpen(true)}
                     onRegenerateBlock={regenerateBlock}
+                    onBlurTrigger={doSync}
                     regeneratingIndex={regeneratingIndex}
                     dirtyIndices={dirtyIndices}
+                    funnelId={funnel.id}
+                    stepId={step.id}
                   />
+                </div>
+
+                {/* Modified indicator + explicit Sync button */}
+                <div className="flex items-center justify-between mb-2 text-[11px] flex-shrink-0">
+                  <div className="flex items-center gap-2 text-neutral-500">
+                    {syncing ? (
+                      <><Loader2 className="w-3 h-3 animate-spin" /> Đang sync HTML từ outline...</>
+                    ) : dirty ? (
+                      <span className="text-amber-400">● Đã sửa — HTML sẽ sync khi anh xong (blur/click chỗ khác) hoặc bấm Sync</span>
+                    ) : (
+                      <span className="text-green-500">✓ HTML đã sync với outline</span>
+                    )}
+                  </div>
+                  {dirty && (
+                    <button onClick={doSync} disabled={syncing}
+                      className="text-xs px-2 py-1 border border-neutral-700 rounded hover:bg-neutral-800 disabled:opacity-40">
+                      Sync ngay
+                    </button>
+                  )}
                 </div>
 
                 {/* Render instructions — extra requirements before HTML gen */}
                 <div className="mb-3 flex-shrink-0">
-                  <label className="text-[10px] text-neutral-500 uppercase tracking-wider block mb-1 flex items-center gap-2">
-                    Yêu cầu thêm cho HTML (optional)
-                    {syncing && <span className="text-[10px] text-neutral-500 flex items-center gap-1"><Loader2 className="w-2.5 h-2.5 animate-spin" /> syncing outline...</span>}
+                  <label className="text-[10px] text-neutral-500 uppercase tracking-wider block mb-1">
+                    Yêu cầu thêm cho STEP (áp dụng cho tất cả blocks)
                   </label>
                   <textarea value={renderInstructions} onChange={e => setRenderInstructions(e.target.value)}
                     className="w-full px-2 py-1.5 bg-neutral-950 border border-neutral-800 rounded text-xs" rows={2}
@@ -1091,6 +1131,7 @@ function StepEditor({ step, funnel, onSaved }: { step: StepDetail; funnel: Funne
       {addBlockOpen && (
         <AddBlockModal
           stepId={step.id}
+          existingBlocks={copyDraft.blocks.map(b => ({ kind: b.kind, content: b.content }))}
           onClose={() => setAddBlockOpen(false)}
           onAdd={addBlock}
         />

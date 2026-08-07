@@ -210,11 +210,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const CONCURRENCY = 3
       const htmlBlocks: Array<{ kind: string; content: any; html: string; generated_at: string; error?: string; usage?: any }> = new Array(blocks.length)
 
-      async function renderOne(block: { kind: string; content: any }, index: number) {
+      async function renderOne(block: { id?: string; kind: string; content: any; extras?: any }, index: number) {
         if (block.kind === 'custom' && block.content?.html) {
           htmlBlocks[index] = {
-            kind: block.kind, content: block.content,
-            html: `<section class="py-16 md:py-24" data-block-index="${index}" data-block-kind="${block.kind}">${block.content.html}</section>`,
+            id: block.id, kind: block.kind, content: block.content, extras: block.extras,
+            html: `<section class="py-16 md:py-24" data-block-index="${index}" data-block-kind="${block.kind}"${block.id ? ` data-block-id="${block.id}"` : ''}>${block.content.html}</section>`,
             generated_at: new Date().toISOString(),
           }
           return
@@ -232,15 +232,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           if (fence) sectionHtml = fence[1].trim()
           sectionHtml = sectionHtml.replace(/^[\s\S]*?<body[^>]*>/i, '').replace(/<\/body>[\s\S]*$/i, '').trim()
           if (!sectionHtml) sectionHtml = `<!-- block ${block.kind} empty -->`
-          sectionHtml = injectBlockMeta(sectionHtml, index, block.kind)
+          sectionHtml = injectBlockMeta(sectionHtml, index, block.kind, block.id)
           htmlBlocks[index] = {
-            kind: block.kind, content: block.content,
+            id: block.id, kind: block.kind, content: block.content, extras: block.extras,
             html: sectionHtml, generated_at: new Date().toISOString(),
             usage: r.usage,
           }
         } catch (e: any) {
           htmlBlocks[index] = {
-            kind: block.kind, content: block.content,
+            id: block.id, kind: block.kind, content: block.content, extras: block.extras,
             html: `<!-- block ${block.kind} error: ${e.message.slice(0, 80)} -->`,
             generated_at: new Date().toISOString(), error: e.message,
           }
@@ -303,11 +303,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const renderInstructions = body.render_instructions ?? step.render_instructions ?? undefined
       const stepMeta = { name: step.name, page_type: step.page_type, has_form: step.has_form, form_fields: step.form_fields }
 
+      // Allow extras override from client
+      if (body.extras) block.extras = body.extras
+
       let sectionHtml: string
       let usage: any
       try {
         if (block.kind === 'custom' && block.content?.html) {
-          sectionHtml = `<section class="py-16 md:py-24" data-block-index="${blockIndex}" data-block-kind="${block.kind}">${block.content.html}</section>`
+          sectionHtml = `<section class="py-16 md:py-24" data-block-index="${blockIndex}" data-block-kind="${block.kind}"${block.id ? ` data-block-id="${block.id}"` : ''}>${block.content.html}</section>`
         } else {
           const { system, user } = await composeBlockRenderPrompts({
             funnelId: step.funnel_id, block, style, stepMeta, renderInstructions,
@@ -319,17 +322,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           if (fence) s = fence[1].trim()
           s = s.replace(/^[\s\S]*?<body[^>]*>/i, '').replace(/<\/body>[\s\S]*$/i, '').trim()
           if (!s) s = `<!-- block ${block.kind} empty -->`
-          sectionHtml = injectBlockMeta(s, blockIndex, block.kind)
+          sectionHtml = injectBlockMeta(s, blockIndex, block.kind, block.id)
         }
       } catch (e: any) {
         return res.status(500).json({ error: `Block render failed: ${e.message}` })
       }
 
       const existingBlocks = (((step.html_blocks as any) || []) as any[]).slice()
-      // Pad if needed
       while (existingBlocks.length <= blockIndex) existingBlocks.push(null)
       existingBlocks[blockIndex] = {
-        kind: block.kind, content: block.content,
+        id: block.id, kind: block.kind, content: block.content, extras: block.extras,
         html: sectionHtml, generated_at: new Date().toISOString(), usage,
       }
 
@@ -360,26 +362,48 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const { data: flow } = await admin.from('funnel_flows').select('style_preset').eq('id', step.funnel_id).single()
       const style = (flow?.style_preset || {}) as StyleInstructions
 
+      // Build lookup by block id (primary) with content-hash fallback for backward-compat blocks
+      const byId = new Map<string, any>()
+      const byHash = new Map<string, any>()
+      existingBlocks.forEach(b => {
+        if (b?.id) byId.set(b.id, b)
+        if (b?.content) byHash.set(hashContent(b.kind, b.content), b)
+      })
+
       const dirty: number[] = []
+      const dirtyIds: string[] = []
       const updatedBlocks: any[] = []
+
       newDraft.blocks.forEach((newBlock: any, i: number) => {
-        const existing = existingBlocks[i]
+        // Try match by id first, then by content hash (for moved blocks whose content didn't change)
+        let existing = newBlock.id ? byId.get(newBlock.id) : undefined
+        if (!existing) existing = byHash.get(hashContent(newBlock.kind, newBlock.content))
+
         if (!existing) {
+          // New block — needs render
           dirty.push(i)
-          updatedBlocks[i] = { kind: newBlock.kind, content: newBlock.content, html: `<!-- block ${i} needs render -->`, is_stale: true }
+          if (newBlock.id) dirtyIds.push(newBlock.id)
+          updatedBlocks[i] = {
+            id: newBlock.id,
+            kind: newBlock.kind, content: newBlock.content, extras: newBlock.extras,
+            html: `<!-- block ${i} (${newBlock.kind}) needs render -->`, is_stale: true,
+          }
           return
         }
         if (existing.kind !== newBlock.kind) {
           dirty.push(i)
-          updatedBlocks[i] = { ...existing, kind: newBlock.kind, content: newBlock.content, is_stale: true }
+          if (newBlock.id) dirtyIds.push(newBlock.id)
+          updatedBlocks[i] = { ...existing, id: newBlock.id || existing.id, kind: newBlock.kind, content: newBlock.content, extras: newBlock.extras, is_stale: true }
           return
         }
+        // Attempt text-replace sync
         const { synced, html: newHtml } = trySyncBlock(existing.content, newBlock.content, existing.html || '')
         if (synced) {
-          updatedBlocks[i] = { ...existing, content: newBlock.content, html: newHtml, is_stale: false }
+          updatedBlocks[i] = { ...existing, id: newBlock.id || existing.id, content: newBlock.content, extras: newBlock.extras, html: newHtml, is_stale: false }
         } else {
           dirty.push(i)
-          updatedBlocks[i] = { ...existing, content: newBlock.content, is_stale: true }
+          if (newBlock.id) dirtyIds.push(newBlock.id)
+          updatedBlocks[i] = { ...existing, id: newBlock.id || existing.id, content: newBlock.content, extras: newBlock.extras, is_stale: true }
         }
       })
 
@@ -392,41 +416,93 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         updated_at: new Date().toISOString(),
       }).eq('id', id)
 
-      return res.json({ synced_count: updatedBlocks.length - dirty.length, dirty_indices: dirty, html })
+      return res.json({
+        synced_count: updatedBlocks.length - dirty.length,
+        dirty_indices: dirty,
+        dirty_ids: dirtyIds,
+        html,
+      })
     }
 
-    // Action: GENERATE-BLOCK — AI generates 1 block content from intent (for Custom AI picker)
+    // Action: GENERATE-BLOCK — AI generates 1 block content from intent
+    // Used by AddBlockModal (auto-fill on click) + custom AI freeform
+    // Accepts context_blocks + funnel shared_context so AI generates content that fits the page
     if (action === 'generate-block' && id) {
       const body = req.body || {}
       const intent = String(body.intent || '').trim()
       const hintKind = String(body.hint_kind || 'custom')
-      if (!intent) return res.status(400).json({ error: 'intent required' })
+      const contextBlocks = Array.isArray(body.context_blocks) ? body.context_blocks : []
+      if (!intent && hintKind === 'custom') return res.status(400).json({ error: 'intent required for custom block' })
 
       const { data: step } = await admin.from('funnel_steps').select('funnel_id, page_type, name').eq('id', id).single()
       if (!step) return res.status(404).json({ error: 'Step not found' })
+      const { data: flow } = await admin.from('funnel_flows').select('shared_context').eq('id', step.funnel_id).single()
 
-      const systemPrompt = `Bạn là copywriter tạo 1 BLOCK JSON cho landing page tiếng Việt.
+      // Build content shape hint for known kinds (so AI outputs the right structure)
+      const shapeHints: Record<string, string> = {
+        'hero': '{ headline, subheadline, cta_text }',
+        'hero-video': '{ headline, subheadline, cta_text, video_url? }',
+        'hero-split': '{ headline, subheadline, cta_text, visual_hint }',
+        'pain-list': '{ title, bullets: string[] (3-5) }',
+        'pain-story': '{ title, story: string (2-4 paragraphs) }',
+        'solution-reveal': '{ title, body, tagline? }',
+        'feature-benefit': '{ title, items: [{feature, benefit}] (3-6) }',
+        'mechanism': '{ title, steps: [{name, description}] (3-5) }',
+        'testimonials-grid': '{ title, items: [{quote, author_name, author_title?}] (2-6) }',
+        'testimonial-quote': '{ quote, author_name, author_title? }',
+        'stats-numbers': '{ title?, items: [{number, label}] (3-4) }',
+        'logos-strip': '{ title?, logos: [{name}] (4-8) }',
+        'case-study': '{ title, subject_name, before, after, quote }',
+        'pricing-table': '{ title?, tiers: [{name, price, features: string[], highlighted?, cta_text}] }',
+        'pricing-single': '{ name, price, price_anchor?, features: string[], cta_text }',
+        'bonus-stack': '{ title, items: [{name, description, value_note}] }',
+        'guarantee': '{ title, body, days?: number }',
+        'countdown': '{ title, target_date_hint, subtext? }',
+        'scarcity-list': '{ title, items: string[] }',
+        'faq-accordion': '{ title, items: [{question, answer}] (5-8) }',
+        'comparison-table': '{ title, columns: string[], rows: [{feature, values: string[]}] }',
+        'timeline': '{ title, steps: [{when, title, description}] }',
+        'cta-simple': '{ headline?, cta_text, sub? }',
+        'cta-with-form': '{ headline, sub?, cta_text }',
+        'cta-repeat': '{ headline, sub, cta_text, urgency_note? }',
+        'custom': '{ intent, markdown }',
+      }
+      const targetShape = shapeHints[hintKind] || shapeHints.custom
+      const isCustomKind = hintKind === 'custom'
 
+      const systemPrompt = isCustomKind
+        ? `Bạn là copywriter tạo 1 BLOCK JSON cho landing page tiếng Việt.
 Output PHẢI là JSON valid: { "kind": "<block_kind>", "content": {...} }
-
-Available block kinds: hero, hero-video, hero-split, pain-list, pain-story, solution-reveal, feature-benefit, mechanism, testimonials-grid, testimonial-quote, stats-numbers, logos-strip, case-study, pricing-table, pricing-single, bonus-stack, guarantee, countdown, scarcity-list, faq-accordion, comparison-table, timeline, cta-simple, cta-with-form, cta-repeat, custom.
-
+Available kinds: hero, hero-video, hero-split, pain-list, pain-story, solution-reveal, feature-benefit, mechanism, testimonials-grid, testimonial-quote, stats-numbers, logos-strip, case-study, pricing-table, pricing-single, bonus-stack, guarantee, countdown, scarcity-list, faq-accordion, comparison-table, timeline, cta-simple, cta-with-form, cta-repeat, custom.
 Nếu không kind nào phù hợp → dùng "custom" với content { intent, markdown }.
 KHÔNG wrap markdown code fence. Chỉ pure JSON. Tiếng Việt, dùng "bạn".`
+        : `Bạn là copywriter tạo 1 BLOCK JSON kind "${hintKind}" cho landing page tiếng Việt.
+Output PHẢI là JSON valid: { "kind": "${hintKind}", "content": {...} }
+Content shape BẮT BUỘC: ${targetShape}
+Đọc context của funnel + các blocks đã có để viết content phù hợp, không lặp lại nội dung của blocks khác.
+KHÔNG wrap markdown code fence. Chỉ pure JSON. Tiếng Việt, dùng "bạn".`
 
-      const userPrompt = `# Step context
-- Step name: ${step.name}
-- Page type: ${step.page_type}
-- Hint kind (user gợi ý): ${hintKind}
-
-# User intent
-${intent}
-
-# Task
-Sinh 1 block JSON phù hợp với intent trên. Chọn kind phù hợp nhất.`
+      const contextLines: string[] = [`# Step: ${step.name} (${step.page_type})`]
+      if (flow?.shared_context && Object.keys(flow.shared_context).length > 0) {
+        contextLines.push('', '# Funnel Shared Context')
+        Object.entries(flow.shared_context).forEach(([k, v]) => {
+          contextLines.push(`- ${k}: ${typeof v === 'string' ? v : JSON.stringify(v)}`)
+        })
+      }
+      if (contextBlocks.length > 0) {
+        contextLines.push('', '# Blocks đã có trong step này (đừng lặp nội dung)')
+        contextBlocks.forEach((b: any, i: number) => {
+          const preview = b?.content?.headline || b?.content?.title || b?.content?.quote || JSON.stringify(b?.content || {}).slice(0, 80)
+          contextLines.push(`${i + 1}. [${b.kind}] ${String(preview).slice(0, 100)}`)
+        })
+      }
+      if (intent) contextLines.push('', '# User intent', intent)
+      contextLines.push('', '# Task', isCustomKind
+        ? 'Sinh 1 block JSON phù hợp với intent + context. Chọn kind hợp lý.'
+        : `Sinh content JSON cho block kind "${hintKind}" — phù hợp với funnel context + không lặp blocks khác.`)
 
       try {
-        const r = await runCompletion({ provider: 'openai-codex', model: body.model, systemPrompt, userPrompt, maxTokens: 2000 })
+        const r = await runCompletion({ provider: 'openai-codex', model: body.model, systemPrompt, userPrompt: contextLines.join('\n'), maxTokens: 2000 })
         let text = r.text.trim()
         const fence = text.match(/^```(?:json)?\s*\n?([\s\S]*?)\n?```$/)
         if (fence) text = fence[1].trim()
@@ -436,7 +512,7 @@ Sinh 1 block JSON phù hợp với intent trên. Chọn kind phù hợp nhất.`
         } catch (e: any) {
           return res.status(500).json({ error: `AI returned invalid JSON: ${e.message}`, raw: text.slice(0, 500) })
         }
-        if (!block.kind) block.kind = 'custom'
+        if (!block.kind) block.kind = hintKind
         if (!block.content) block.content = { intent, markdown: '' }
         return res.json({ block, usage: r.usage })
       } catch (e: any) {
@@ -528,14 +604,12 @@ function injectFormHiddens(html: string, funnelId: string, stepId: string): stri
   })
 }
 
-/** Inject data-block-index attribute into the first section/div of block HTML.
- *  Enables sync-outline surgical text replaces (and future block-aware operations). */
-function injectBlockMeta(html: string, index: number, kind: string): string {
-  // Skip if already has data-block-index (avoid double injection)
+/** Inject data-block-index + data-block-id attributes into first section/div of block HTML. */
+function injectBlockMeta(html: string, index: number, kind: string, blockId?: string): string {
   if (/data-block-index=/.test(html.slice(0, 200))) return html
-  // Inject into first opening tag (usually <section> or <div>)
+  const idAttr = blockId ? ` data-block-id="${blockId}"` : ''
   return html.replace(/^(\s*<[a-z][a-z0-9]*)(\s|>)/i, (m, tag, sep) =>
-    `${tag} data-block-index="${index}" data-block-kind="${kind}"${sep}`)
+    `${tag} data-block-index="${index}" data-block-kind="${kind}"${idAttr}${sep}`)
 }
 
 /** Deterministic text-replace sync for outline edits.
@@ -597,4 +671,9 @@ function diffStrings(oldObj: any, newObj: any, path: string = ''): Array<{ path:
 
 function escapeForHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+}
+
+/** Stable hash of block content — used by sync-outline to detect moved blocks (same content, different position). */
+function hashContent(kind: string, content: any): string {
+  return `${kind}:${JSON.stringify(content)}`
 }

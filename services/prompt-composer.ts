@@ -178,12 +178,16 @@ export async function composeDraftPrompts(input: ComposeDraftInput): Promise<{ s
 }
 
 // ─── PHASE 2B: Per-block render (avoid max-output-tokens + parallelize) ────────
+export interface BlockExtras {
+  additional_prompt?: string   // Per-block requirement
+  image_urls?: string[]         // Images to embed
+}
 export interface ComposeBlockRenderInput {
   funnelId: string
-  block: { kind: string; content: any }
+  block: { kind: string; content: any; extras?: BlockExtras }
   style: StyleInstructions
   stepMeta: { name: string; page_type: string; has_form: boolean; form_fields?: any[] }
-  renderInstructions?: string    // Extra user constraints (VD: "không dùng gradient")
+  renderInstructions?: string    // Step-level extra requirements
 }
 
 export async function composeBlockRenderPrompts(input: ComposeBlockRenderInput): Promise<{ system: string; user: string }> {
@@ -194,7 +198,19 @@ export async function composeBlockRenderPrompts(input: ComposeBlockRenderInput):
   parts.push('---\n\n' + styleInstructionsBlock(input.style))
   parts.push('---\n\n' + BLOCK_TO_HTML_GUIDE)
   if (input.renderInstructions && input.renderInstructions.trim()) {
-    parts.push('---\n\n# YÊU CẦU BỔ SUNG CỦA USER (BẮT BUỘC ÁP DỤNG)\n\n' + input.renderInstructions.trim())
+    parts.push('---\n\n# YÊU CẦU BỔ SUNG CHO STEP (BẮT BUỘC ÁP DỤNG)\n\n' + input.renderInstructions.trim())
+  }
+  const extras = input.block.extras
+  const extraLines: string[] = []
+  if (extras?.additional_prompt && extras.additional_prompt.trim()) {
+    extraLines.push(`Requirements for this block: ${extras.additional_prompt.trim()}`)
+  }
+  if (extras?.image_urls && extras.image_urls.length > 0) {
+    extraLines.push(`Images available for this block (embed in HTML — sử dụng <img> hoặc background):`)
+    extras.image_urls.forEach(u => extraLines.push(`- ${u}`))
+  }
+  if (extraLines.length > 0) {
+    parts.push('---\n\n# YÊU CẦU RIÊNG CHO BLOCK NÀY\n\n' + extraLines.join('\n'))
   }
   parts.push('---\n\n' + BLOCK_RUNTIME_RULES)
 
