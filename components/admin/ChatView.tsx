@@ -1,6 +1,17 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react'
-import { MessageCircle, Send, Loader2, Circle, CheckCircle2, User, Mail, Phone, Tag, ExternalLink, Inbox as InboxIcon, StickyNote, MoreVertical, Filter, Settings, Copy, Check } from 'lucide-react'
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import { MessageCircle, Send, Loader2, Circle, CheckCircle2, User, Mail, Phone, Tag, ExternalLink, Inbox as InboxIcon, StickyNote, MoreVertical, Filter, Settings, Copy, Check, ArrowRight, UserPlus, Zap } from 'lucide-react'
 import { supabase } from '../../services/supabase'
+import { fetchPipelineStages } from '../../services/api'
+import type { Lead, PipelineStage, Profile } from '../../types'
+import LeadDetail from './LeadDetail'
+import StudentDetailDrawer from './StudentDetailDrawer'
+
+interface CannedResponse {
+  id: string
+  title: string
+  body: string
+  shortcut: string | null
+}
 
 interface Inbox {
   id: string; name: string; channel_type: string; channel_config: any
@@ -49,6 +60,114 @@ export default function ChatView() {
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState({ status: 'open', assignee: '' as '' | 'me' | 'unassigned', inbox_id: '' })
   const [inboxManagerOpen, setInboxManagerOpen] = useState(false)
+
+  // Cross-links: open Lead / Student drawer from contact sidebar
+  const [leadDrawer, setLeadDrawer] = useState<Lead | null>(null)
+  const [studentDrawer, setStudentDrawer] = useState<Profile | null>(null)
+  const [pipelineStages, setPipelineStages] = useState<PipelineStage[]>([])
+  const [drawerLoading, setDrawerLoading] = useState(false)
+  const [drawerError, setDrawerError] = useState<string | null>(null)
+
+  // Canned responses (shared across all conversations)
+  const [cannedResponses, setCannedResponses] = useState<CannedResponse[]>([])
+
+  const loadCanned = useCallback(async () => {
+    try {
+      const r = await api<{ canned_responses: CannedResponse[] }>('/api/chat/canned-responses')
+      setCannedResponses(r.canned_responses || [])
+    } catch (e) {
+      // Non-fatal; just log
+      console.warn('[ChatView] canned responses load failed:', e)
+    }
+  }, [])
+
+  useEffect(() => {
+    fetchPipelineStages().then(setPipelineStages).catch(() => setPipelineStages([]))
+    loadCanned()
+  }, [loadCanned])
+
+  const openLeadDrawer = useCallback(async (leadId: string) => {
+    setDrawerLoading(true); setDrawerError(null)
+    try {
+      const { data, error } = await supabase
+        .from('leads')
+        .select('*, pipeline_stage:pipeline_stages(*)')
+        .eq('id', leadId)
+        .maybeSingle()
+      if (error) throw error
+      if (!data) throw new Error('Không tìm thấy lead')
+      setLeadDrawer(data as Lead)
+    } catch (e: any) {
+      setDrawerError(e?.message || 'Không mở được lead')
+    } finally {
+      setDrawerLoading(false)
+    }
+  }, [])
+
+  const openStudentDrawer = useCallback(async (customerId: string) => {
+    setDrawerLoading(true); setDrawerError(null)
+    try {
+      const { data, error } = await supabase
+        .from('customers')
+        .select('*')
+        .eq('id', customerId)
+        .maybeSingle()
+      if (error) throw error
+      if (!data) throw new Error('Không tìm thấy khách hàng')
+      setStudentDrawer(data as Profile)
+    } catch (e: any) {
+      setDrawerError(e?.message || 'Không mở được khách hàng')
+    } finally {
+      setDrawerLoading(false)
+    }
+  }, [])
+
+  const createLeadFromChat = useCallback(async (payload: { email: string; name?: string; phone?: string; source_url?: string }, conversationId: string) => {
+    setDrawerLoading(true); setDrawerError(null)
+    try {
+      // Find or create lead
+      const emailLower = payload.email.trim().toLowerCase()
+      const { data: existing } = await supabase
+        .from('leads')
+        .select('*, pipeline_stage:pipeline_stages(*)')
+        .eq('email', emailLower)
+        .maybeSingle()
+
+      let lead: Lead | null = existing as Lead | null
+      if (!lead) {
+        const { data: stages } = await supabase
+          .from('pipeline_stages')
+          .select('id')
+          .order('order_index', { ascending: true })
+          .limit(1)
+        const { data: created, error: createErr } = await supabase
+          .from('leads')
+          .insert({
+            name: payload.name || emailLower.split('@')[0],
+            email: emailLower,
+            phone: payload.phone || null,
+            source: 'chat',
+            pipeline_stage_id: stages?.[0]?.id || null,
+            score: 10,
+            notes: payload.source_url ? `Từ chat — ${payload.source_url}` : 'Từ chat',
+          })
+          .select('*, pipeline_stage:pipeline_stages(*)')
+          .single()
+        if (createErr) throw createErr
+        lead = created as Lead
+      }
+
+      // Link the conversation to this lead so future chat sessions attach
+      if (lead) {
+        await supabase.from('chat_conversations').update({ lead_id: lead.id }).eq('id', conversationId)
+      }
+      if (lead) setLeadDrawer(lead)
+    } catch (e: any) {
+      setDrawerError(e?.message || 'Không tạo được lead')
+    } finally {
+      setDrawerLoading(false)
+    }
+  }, [])
 
   const loadInboxes = useCallback(async () => {
     try {
@@ -163,7 +282,16 @@ export default function ChatView() {
       {/* CENTER: chat view */}
       <div className="flex-1 flex flex-col min-w-0">
         {selectedId ? (
-          <ConversationDetail key={selectedId} conversationId={selectedId} onUpdate={loadList} />
+          <ConversationDetail
+            key={selectedId}
+            conversationId={selectedId}
+            onUpdate={loadList}
+            cannedResponses={cannedResponses}
+            onOpenLead={openLeadDrawer}
+            onOpenStudent={openStudentDrawer}
+            onCreateLeadFromChat={createLeadFromChat}
+            drawerLoading={drawerLoading}
+          />
         ) : (
           <div className="flex-1 flex items-center justify-center text-neutral-500">
             <div className="text-center">
@@ -179,6 +307,30 @@ export default function ChatView() {
       {inboxManagerOpen && (
         <InboxManagerModal inboxes={inboxes} onClose={() => setInboxManagerOpen(false)} onSaved={loadInboxes} />
       )}
+
+      {drawerError && (
+        <div className="fixed bottom-4 right-4 z-[70] bg-red-500/20 border border-red-500/40 text-red-300 px-3 py-2 rounded text-xs max-w-xs shadow-lg">
+          {drawerError}
+          <button className="ml-2 text-red-100" onClick={() => setDrawerError(null)}>×</button>
+        </div>
+      )}
+
+      {leadDrawer && (
+        <LeadDetail
+          lead={leadDrawer}
+          stages={pipelineStages}
+          onClose={() => setLeadDrawer(null)}
+          onUpdate={updated => setLeadDrawer(updated)}
+        />
+      )}
+
+      {studentDrawer && (
+        <StudentDetailDrawer
+          student={studentDrawer}
+          onClose={() => setStudentDrawer(null)}
+          onUpdate={updated => setStudentDrawer(updated)}
+        />
+      )}
     </div>
   )
 }
@@ -186,13 +338,53 @@ export default function ChatView() {
 // ══════════════════════════════════════════════════════════════════════════
 // CONVERSATION DETAIL
 // ══════════════════════════════════════════════════════════════════════════
-function ConversationDetail({ conversationId, onUpdate }: { conversationId: string; onUpdate: () => void }) {
+interface ConversationDetailProps {
+  conversationId: string
+  onUpdate: () => void
+  cannedResponses: CannedResponse[]
+  onOpenLead: (leadId: string) => void
+  onOpenStudent: (customerId: string) => void
+  onCreateLeadFromChat: (payload: { email: string; name?: string; phone?: string; source_url?: string }, conversationId: string) => void
+  drawerLoading: boolean
+}
+
+function ConversationDetail({
+  conversationId, onUpdate,
+  cannedResponses, onOpenLead, onOpenStudent, onCreateLeadFromChat, drawerLoading,
+}: ConversationDetailProps) {
   const [detail, setDetail] = useState<{ conversation: Conversation; messages: Message[]; contact: any; inbox: any } | null>(null)
   const [loading, setLoading] = useState(true)
   const [reply, setReply] = useState('')
   const [sending, setSending] = useState(false)
   const [isNote, setIsNote] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+
+  // Canned-response dropdown state — shown when reply starts with '/'
+  const [cannedIdx, setCannedIdx] = useState(0)
+  const cannedFilter = useMemo(() => {
+    const trimmed = reply.trimStart()
+    if (!trimmed.startsWith('/')) return null
+    return trimmed.slice(1).toLowerCase()
+  }, [reply])
+  const cannedMatches = useMemo(() => {
+    if (cannedFilter === null) return []
+    const q = cannedFilter.trim()
+    return cannedResponses.filter(cr => {
+      if (!q) return true
+      return (
+        (cr.shortcut || '').toLowerCase().startsWith(q) ||
+        cr.title.toLowerCase().includes(q)
+      )
+    }).slice(0, 8)
+  }, [cannedFilter, cannedResponses])
+  useEffect(() => { setCannedIdx(0) }, [cannedFilter])
+  const cannedOpen = cannedFilter !== null && cannedMatches.length > 0
+
+  const insertCanned = (cr: CannedResponse) => {
+    setReply(cr.body)
+    setTimeout(() => textareaRef.current?.focus(), 0)
+  }
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -315,12 +507,70 @@ function ConversationDetail({ conversationId, onUpdate }: { conversationId: stri
               <StickyNote className="w-3 h-3" /> Internal note
             </button>
           </div>
-          <div className="flex gap-2">
-            <textarea value={reply} onChange={e => setReply(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }}
-              rows={2}
-              placeholder={isNote ? 'Nội bộ (visitor không thấy)...' : 'Nhập reply gửi visitor... (Enter để gửi, Shift+Enter xuống dòng)'}
-              className="flex-1 px-3 py-2 bg-neutral-900 border border-neutral-800 rounded text-sm resize-none" />
+          <div className="flex gap-2 relative">
+            <div className="flex-1 relative">
+              <textarea ref={textareaRef} value={reply} onChange={e => setReply(e.target.value)}
+                onKeyDown={e => {
+                  if (cannedOpen) {
+                    if (e.key === 'ArrowDown') { e.preventDefault(); setCannedIdx(i => Math.min(i + 1, cannedMatches.length - 1)); return }
+                    if (e.key === 'ArrowUp') { e.preventDefault(); setCannedIdx(i => Math.max(i - 1, 0)); return }
+                    if (e.key === 'Escape') {
+                      e.preventDefault()
+                      // Close the dropdown but preserve any typed characters
+                      if (reply.startsWith('/')) setReply(reply.replace(/^\//, ''))
+                      return
+                    }
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault()
+                      const chosen = cannedMatches[cannedIdx]
+                      if (chosen) insertCanned(chosen)
+                      return
+                    }
+                    if (e.key === 'Tab') {
+                      e.preventDefault()
+                      const chosen = cannedMatches[cannedIdx]
+                      if (chosen) insertCanned(chosen)
+                      return
+                    }
+                  }
+                  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() }
+                }}
+                rows={2}
+                placeholder={isNote ? 'Nội bộ (visitor không thấy)...' : 'Nhập reply... (gõ "/" để chọn snippet, Enter để gửi, Shift+Enter xuống dòng)'}
+                className="w-full px-3 py-2 bg-neutral-900 border border-neutral-800 rounded text-sm resize-none" />
+
+              {cannedOpen && (
+                <div className="absolute bottom-full left-0 right-0 mb-1 bg-neutral-950 border border-neutral-700 rounded shadow-lg max-h-56 overflow-y-auto z-30">
+                  <div className="px-2 py-1 text-[10px] text-neutral-500 uppercase tracking-wider border-b border-neutral-800 flex items-center gap-1">
+                    <Zap className="w-3 h-3" /> Snippets — Enter/Tab để chèn, Esc để huỷ
+                  </div>
+                  {cannedMatches.map((cr, i) => (
+                    <button
+                      key={cr.id}
+                      type="button"
+                      onMouseDown={e => { e.preventDefault(); insertCanned(cr) }}
+                      onMouseEnter={() => setCannedIdx(i)}
+                      className={`w-full text-left px-2.5 py-2 border-b border-neutral-800/70 last:border-0 transition-colors ${
+                        i === cannedIdx ? 'bg-neutral-800' : 'hover:bg-neutral-900'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 mb-0.5">
+                        <span className="text-xs font-medium text-white truncate">{cr.title}</span>
+                        {cr.shortcut && (
+                          <span className="text-[10px] font-mono px-1.5 py-0.5 bg-neutral-800 text-neutral-400 rounded">/{cr.shortcut}</span>
+                        )}
+                      </div>
+                      <div className="text-[11px] text-neutral-500 truncate">{cr.body}</div>
+                    </button>
+                  ))}
+                  {cannedResponses.length === 0 && (
+                    <div className="px-3 py-2 text-[11px] text-neutral-500">
+                      Chưa có snippet nào — tạo trong Cài đặt → Chat snippets.
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
             <button onClick={send} disabled={sending || !reply.trim()}
               style={{ background: isNote ? '#F59E0B' : 'var(--color-mission-accent)', color: '#000' }}
               className="px-4 py-2 rounded font-semibold text-sm flex items-center gap-1 hover:opacity-90 disabled:opacity-40">
@@ -351,8 +601,62 @@ function ConversationDetail({ conversationId, onUpdate }: { conversationId: stri
                 </div>
               )}
               {contact.source && <div className="text-[10px] text-neutral-500">Source: {contact.source}</div>}
+
+              {/* Cross-links to Lead / Customer detail drawers */}
+              <div className="pt-2 flex flex-col gap-1.5">
+                {contact.type === 'customer' && c.customer_id && (
+                  <button
+                    onClick={() => onOpenStudent(c.customer_id!)}
+                    disabled={drawerLoading}
+                    className="w-full flex items-center justify-between gap-1.5 text-[11px] px-2 py-1.5 rounded bg-blue-500/10 border border-blue-500/30 text-blue-300 hover:bg-blue-500/20 disabled:opacity-50"
+                  >
+                    <span>Xem khách hàng</span>
+                    <ArrowRight className="w-3 h-3" />
+                  </button>
+                )}
+                {contact.type === 'lead' && c.lead_id && (
+                  <button
+                    onClick={() => onOpenLead(c.lead_id!)}
+                    disabled={drawerLoading}
+                    className="w-full flex items-center justify-between gap-1.5 text-[11px] px-2 py-1.5 rounded bg-green-500/10 border border-green-500/30 text-green-300 hover:bg-green-500/20 disabled:opacity-50"
+                  >
+                    <span>Xem lead gốc</span>
+                    <ArrowRight className="w-3 h-3" />
+                  </button>
+                )}
+                {/* Also allow jumping to the underlying lead when this is now a customer */}
+                {contact.type === 'customer' && c.lead_id && (
+                  <button
+                    onClick={() => onOpenLead(c.lead_id!)}
+                    disabled={drawerLoading}
+                    className="w-full flex items-center justify-between gap-1.5 text-[11px] px-2 py-1.5 rounded border border-neutral-700 text-neutral-400 hover:text-white hover:bg-neutral-800 disabled:opacity-50"
+                  >
+                    <span>Xem lead gốc</span>
+                    <ArrowRight className="w-3 h-3" />
+                  </button>
+                )}
+              </div>
             </div>
-          ) : <p className="text-xs text-neutral-500">Anonymous visitor</p>}
+          ) : (
+            <p className="text-xs text-neutral-500">Anonymous visitor</p>
+          )}
+
+          {/* Offer to create a lead when there's no lead / customer link but we have an email */}
+          {(!c.lead_id && !c.customer_id) && contact?.email && (
+            <button
+              onClick={() => onCreateLeadFromChat({
+                email: contact.email,
+                name: contact.name || contact.display_name,
+                phone: contact.phone,
+                source_url: c.source_url || undefined,
+              }, c.id)}
+              disabled={drawerLoading}
+              className="mt-3 w-full flex items-center justify-center gap-1.5 text-[11px] px-2 py-1.5 rounded font-semibold disabled:opacity-50"
+              style={{ background: 'var(--color-mission-accent)', color: '#000' }}
+            >
+              <UserPlus className="w-3 h-3" /> Tạo lead từ chat
+            </button>
+          )}
         </div>
 
         <div>

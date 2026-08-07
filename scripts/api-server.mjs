@@ -1769,7 +1769,7 @@ const server = http.createServer(async (req, nodeRes) => {
   // CORS preflight
   nodeRes.setHeader('Access-Control-Allow-Origin', '*')
   nodeRes.setHeader('Access-Control-Allow-Headers', 'authorization, content-type, x-webhook-secret')
-  nodeRes.setHeader('Access-Control-Allow-Methods', 'POST, GET, OPTIONS')
+  nodeRes.setHeader('Access-Control-Allow-Methods', 'POST, GET, PATCH, DELETE, OPTIONS')
 
   if (req.method === 'OPTIONS') {
     nodeRes.writeHead(200)

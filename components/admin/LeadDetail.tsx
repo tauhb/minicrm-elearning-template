@@ -6,6 +6,7 @@ import { supabase } from '../../services/supabase'
 import { formatDistanceToNow, format } from 'date-fns'
 import CareHistoryTab from './CareHistoryTab'
 import TasksTab from './TasksTab'
+import ChatConversationList from './ChatConversationList'
 import { useDialog } from '../../contexts/DialogContext'
 
 interface Props {
@@ -42,7 +43,7 @@ const LeadDetail: React.FC<Props> = ({ lead, stages, onClose, onUpdate }) => {
   const [noteType, setNoteType] = useState<LeadActivity['type']>('note')
   const [submitting, setSubmitting] = useState(false)
   const [currentStageId, setCurrentStageId] = useState(lead.pipeline_stage_id || '')
-  const [activeTab, setActiveTab] = useState<'info' | 'care' | 'tasks' | 'activity'>('info')
+  const [activeTab, setActiveTab] = useState<'info' | 'care' | 'tasks' | 'chat' | 'activity'>('info')
 
   // Tags
   const [tags, setTags] = useState<string[]>(lead.tags || [])
@@ -226,11 +227,12 @@ const LeadDetail: React.FC<Props> = ({ lead, stages, onClose, onUpdate }) => {
             { key: 'info',     label: 'Thông tin' },
             { key: 'care',     label: 'Lịch sử CS' },
             { key: 'tasks',    label: 'Tasks' },
+            { key: 'chat',     label: 'Chat' },
             { key: 'activity', label: 'Hoạt động' },
           ].map(tab => (
             <button
               key={tab.key}
-              onClick={() => setActiveTab(tab.key as 'info' | 'care' | 'tasks' | 'activity')}
+              onClick={() => setActiveTab(tab.key as 'info' | 'care' | 'tasks' | 'chat' | 'activity')}
               className={`px-4 py-3 text-xs font-medium border-b-2 transition-all ${
                 activeTab === tab.key
                   ? 'border-current'
@@ -380,6 +382,11 @@ const LeadDetail: React.FC<Props> = ({ lead, stages, onClose, onUpdate }) => {
           {/* TASKS TAB */}
           {activeTab === 'tasks' && (
             <TasksTab leadId={lead.id} />
+          )}
+
+          {/* CHAT TAB */}
+          {activeTab === 'chat' && (
+            <ChatConversationList leadId={lead.id} emailFallback={lead.email} />
           )}
 
           {/* ACTIVITY TAB */}

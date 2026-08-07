@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { Copy, Check, Webhook, Mail, Zap, Info, Sliders, ExternalLink, KeyRound, Palette, Activity, Sparkles, Layers, PenLine, Users } from 'lucide-react'
+import { Copy, Check, Webhook, Mail, Zap, Info, Sliders, ExternalLink, KeyRound, Palette, Activity, Sparkles, Layers, PenLine, Users, MessageSquare } from 'lucide-react'
 import type { PortalTheme } from '../../types'
 import { supabase } from '../../services/supabase'
 import { useConfig } from '../../contexts/ConfigContext'
@@ -8,8 +8,9 @@ import FunnelTypesView from './FunnelTypesView'
 import CopyFormulasView from './CopyFormulasView'
 import HealthCheckTab from './HealthCheckTab'
 import TeamView from './TeamView'
+import ChatSnippetsView from './ChatSnippetsView'
 
-type Tab = 'team' | 'webhook' | 'email' | 'ai' | 'funnel-types' | 'copy-formulas' | 'health' | 'general'
+type Tab = 'team' | 'chat-snippets' | 'webhook' | 'email' | 'ai' | 'funnel-types' | 'copy-formulas' | 'health' | 'general'
 
 const THEMES: Array<{
   id: PortalTheme; name: string
@@ -54,7 +55,7 @@ const THEMES: Array<{
   },
 ]
 
-const VALID_TABS: Tab[] = ['team', 'webhook', 'email', 'ai', 'funnel-types', 'copy-formulas', 'health', 'general']
+const VALID_TABS: Tab[] = ['team', 'chat-snippets', 'webhook', 'email', 'ai', 'funnel-types', 'copy-formulas', 'health', 'general']
 
 const readTabFromHash = (): Tab | null => {
   if (typeof window === 'undefined') return null
@@ -240,6 +241,7 @@ const SettingsView: React.FC = () => {
       <div className="flex gap-1 mb-6 border-b border-gray-800">
         {([
           { key: 'team', label: 'Đội ngũ', icon: Users },
+          { key: 'chat-snippets', label: 'Chat snippets', icon: MessageSquare },
           { key: 'webhook', label: 'Webhook & Delivery', icon: Webhook },
           { key: 'email', label: 'Email', icon: Mail },
           { key: 'ai', label: 'AI Providers', icon: Sparkles },
@@ -268,6 +270,7 @@ const SettingsView: React.FC = () => {
       </div>
 
       {activeTab === 'team' && <TeamView />}
+      {activeTab === 'chat-snippets' && <ChatSnippetsView />}
 
       {activeTab === 'webhook' && (
         <div className="space-y-6">

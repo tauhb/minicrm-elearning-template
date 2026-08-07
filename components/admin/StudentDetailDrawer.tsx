@@ -5,6 +5,7 @@ import { updateProfile, fetchPayments, resendCustomerMagicLink, setCustomerStatu
 import CareHistoryTab from './CareHistoryTab'
 import EnrollmentsTab from './EnrollmentsTab'
 import TasksTab from './TasksTab'
+import ChatConversationList from './ChatConversationList'
 
 interface Props {
   student: Profile
@@ -18,7 +19,7 @@ const StudentDetailDrawer: React.FC<Props> = ({ student, onClose, onUpdate }) =>
   const [newTag, setNewTag] = useState('')
   const [payments, setPayments] = useState<Payment[]>([])
   const [saving, setSaving] = useState(false)
-  const [activeTab, setActiveTab] = useState<'info' | 'care' | 'tasks' | 'courses'>('info')
+  const [activeTab, setActiveTab] = useState<'info' | 'care' | 'tasks' | 'chat' | 'courses'>('info')
   // Wave 1 Track C
   const [phone, setPhone] = useState<string>((student as any).phone || '')
   const [status, setStatusVal] = useState<'active' | 'deactivated'>(((student as any).status as any) || 'active')
@@ -120,11 +121,12 @@ const StudentDetailDrawer: React.FC<Props> = ({ student, onClose, onUpdate }) =>
             { key: 'info', label: 'Thông tin' },
             { key: 'care', label: 'Lịch sử CS' },
             { key: 'tasks', label: 'Tasks' },
+            { key: 'chat', label: 'Chat' },
             { key: 'courses', label: 'Khóa học' },
           ].map(tab => (
             <button
               key={tab.key}
-              onClick={() => setActiveTab(tab.key as 'info' | 'care' | 'tasks' | 'courses')}
+              onClick={() => setActiveTab(tab.key as 'info' | 'care' | 'tasks' | 'chat' | 'courses')}
               className={`px-4 py-3 text-xs font-medium border-b-2 transition-all ${activeTab === tab.key ? 'border-current' : 'border-transparent text-gray-500 hover:text-white'}`}
               style={activeTab === tab.key ? { color: 'var(--color-mission-accent)', borderColor: 'var(--color-mission-accent)' } : {}}
             >
@@ -235,6 +237,11 @@ const StudentDetailDrawer: React.FC<Props> = ({ student, onClose, onUpdate }) =>
           {/* TASKS TAB */}
           {activeTab === 'tasks' && (
             <TasksTab customerId={student.id} />
+          )}
+
+          {/* CHAT TAB */}
+          {activeTab === 'chat' && (
+            <ChatConversationList customerId={student.id} emailFallback={student.email} />
           )}
 
           {/* COURSES TAB */}
