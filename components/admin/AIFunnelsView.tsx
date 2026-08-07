@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react'
-import { Sparkles, Plus, Loader2, Eye, Edit2, Trash2, ExternalLink, Send, ChevronLeft, Layers, Wand2, FileCode2, X, Check, ArrowRight, Copy, Save, Zap, ArrowUp, ArrowDown, Settings2, Tag, CreditCard, RefreshCw } from 'lucide-react'
+import { Sparkles, Plus, Loader2, Eye, Edit2, Trash2, ExternalLink, Send, ChevronLeft, Layers, Wand2, FileCode2, X, Check, ArrowRight, Copy, Save, Zap, ArrowUp, ArrowDown, Settings2, Tag, CreditCard, RefreshCw, SlidersHorizontal } from 'lucide-react'
 import { supabase } from '../../services/supabase'
 import { StylePicker, StylePreset } from './funnels/StylePicker'
 import { ContentDraftEditor, CopyDraft, ensureBlockIds, newBlockId } from './funnels/ContentDraftEditor'
@@ -766,7 +766,7 @@ function AddStepModal({ onCancel, onAdd }: { onCancel: () => void; onAdd: (page_
 // STEP EDITOR
 // ═══════════════════════════════════════════════════════════════════════════
 function StepEditor({ step, funnel, onSaved }: { step: StepDetail; funnel: FunnelDetail; onSaved: () => void }) {
-  const [tab, setTab] = useState<'setting' | 'outline'>('setting')
+  const [tab, setTab] = useState<'setting' | 'config' | 'outline'>('setting')
   const [mode, setMode] = useState<'ai_draft' | 'ai_direct' | 'imported' | 'blank'>(step.content_source)
   const [formulas, setFormulas] = useState<Formula[]>([])
   const [formulaKey, setFormulaKey] = useState(step.copy_formula_key || 'pas')
@@ -1032,7 +1032,8 @@ function StepEditor({ step, funnel, onSaved }: { step: StepDetail; funnel: Funne
         {/* TABS */}
         <div className="flex gap-1 mb-3 border-b border-neutral-800">
           {([
-            { key: 'setting', label: 'Setting step', icon: Settings2 },
+            { key: 'setting', label: 'Nội dung', icon: Wand2 },
+            { key: 'config',  label: 'Cấu hình', icon: SlidersHorizontal },
             { key: 'outline', label: `Copy outline${hasDraft ? ` (${copyDraft.blocks.length})` : ''}`, icon: Layers },
           ] as const).map(t => (
             <button key={t.key} onClick={() => setTab(t.key)}
@@ -1143,9 +1144,14 @@ function StepEditor({ step, funnel, onSaved }: { step: StepDetail; funnel: Funne
                 {mode === 'ai_direct' ? 'AI Direct (1-step) coming soon. Hiện dùng AI Draft (2-step) — chất lượng tốt hơn.' : 'Blank mode: viết HTML tay coming soon.'}
               </div>
             )}
+          </div>
+        )}
 
+        {/* ═════════ TAB 2: CẤU HÌNH — SEO + Sản phẩm + Form ═════════ */}
+        {tab === 'config' && (
+          <div className="space-y-5 overflow-y-auto pr-2 flex-1">
             {/* Page metadata (SEO) */}
-            <div className="border-t border-neutral-800 pt-4">
+            <div>
               <label className="text-xs text-neutral-500 uppercase tracking-wider block mb-2">Page metadata (SEO)</label>
               <div className="space-y-2">
                 <div>
@@ -1244,7 +1250,7 @@ function StepEditor({ step, funnel, onSaved }: { step: StepDetail; funnel: Funne
               </div>
             )}
 
-            {/* Form config (always visible in Setting tab) */}
+            {/* Form config */}
             <div className="border-t border-neutral-800 pt-4">
               <label className="flex items-center justify-between mb-2">
                 <span className="text-xs text-neutral-500 uppercase tracking-wider">Form config</span>
@@ -1280,7 +1286,7 @@ function StepEditor({ step, funnel, onSaved }: { step: StepDetail; funnel: Funne
           </div>
         )}
 
-        {/* ═════════ TAB 2: COPY OUTLINE ═════════ */}
+        {/* ═════════ TAB 3: COPY OUTLINE ═════════ */}
         {tab === 'outline' && (
           <div className="flex flex-col flex-1 min-h-0">
             {!hasDraft ? (
