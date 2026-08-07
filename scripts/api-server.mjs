@@ -1865,6 +1865,9 @@ const server = http.createServer(async (req, nodeRes) => {
       await handleViaImport(mockReq, res, req.url)
     } else if (req.url === '/api/email/send') {
       await handleEmailSend(mockReq, res)
+    } else if (req.url?.startsWith('/api/email/broadcasts')) {
+      // Track F: GET list / ?action=preview / ?action=env
+      await handleViaImport(mockReq, res, req.url)
     } else if (req.url === '/api/email/broadcast') {
       await handleEmailBroadcast(mockReq, res)
     } else if (req.url === '/api/health/env-check' || req.url?.startsWith('/api/health/env-check?')) {
