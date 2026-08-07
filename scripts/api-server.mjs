@@ -1013,6 +1013,344 @@ async function handleAIGenerate(req, res) {
   } catch (e) { return res.status(500).json({ error: e.message }) }
 }
 
+// --- Funnel Types CRUD ---
+async function handleFunnelTypes(req, res) {
+  const user = await assertAdmin(req, res); if (!user) return
+  const db = adminDbClient()
+  const url = new URL(req.url, 'http://localhost')
+  const id = url.searchParams.get('id')
+
+  try {
+    if (req.method === 'GET') {
+      if (id) {
+        const { data, error } = await db.from('funnel_types').select('*').eq('id', id).single()
+        if (error) return res.status(404).json({ error: error.message })
+        return res.json(data)
+      }
+      const { data } = await db.from('funnel_types')
+        .select('id, key, name, description, icon, color, suggested_steps, is_builtin, is_active, sort_order, updated_at')
+        .order('sort_order').order('name')
+      return res.json({ types: data || [] })
+    }
+    if (req.method === 'DELETE') {
+      if (!id) return res.status(400).json({ error: 'id required' })
+      const { data: existing } = await db.from('funnel_types').select('is_builtin, key').eq('id', id).maybeSingle()
+      if (!existing) return res.status(404).json({ error: 'Not found' })
+      if (existing.is_builtin) return res.status(400).json({ error: `Cannot delete built-in type "${existing.key}"` })
+      const { error } = await db.from('funnel_types').delete().eq('id', id)
+      if (error) return res.status(500).json({ error: error.message })
+      return res.json({ success: true })
+    }
+    if (req.method === 'POST') {
+      const body = req.body || {}
+      if (!body.name) return res.status(400).json({ error: 'name required' })
+      const slugify = s => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+        .replace(/đ/g, 'd').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'custom'
+      const key = body.key || slugify(body.name)
+      const payload = {
+        key, name: body.name, description: body.description || '',
+        icon: body.icon || 'zap', color: body.color || '#B6FF00',
+        system_prompt: body.system_prompt || '',
+        suggested_steps: body.suggested_steps || [],
+        is_active: body.is_active !== false,
+        sort_order: body.sort_order || 100,
+        updated_at: new Date().toISOString(),
+      }
+      if (body.id) {
+        const { data: existing } = await db.from('funnel_types').select('is_builtin, key').eq('id', body.id).maybeSingle()
+        if (!existing) return res.status(404).json({ error: 'Not found' })
+        if (existing.is_builtin && payload.key !== existing.key) return res.status(400).json({ error: `Cannot change key of built-in type "${existing.key}"` })
+        const { data, error } = await db.from('funnel_types').update(payload).eq('id', body.id).select().single()
+        if (error) return res.status(500).json({ error: error.message })
+        return res.json(data)
+      } else {
+        const { data: dupe } = await db.from('funnel_types').select('id').eq('key', key).maybeSingle()
+        if (dupe) return res.status(409).json({ error: `Key "${key}" đã tồn tại` })
+        payload.is_builtin = false
+        payload.created_by = user.id
+        const { data, error } = await db.from('funnel_types').insert(payload).select().single()
+        if (error) return res.status(500).json({ error: error.message })
+        return res.json(data)
+      }
+    }
+    return res.status(405).json({ error: 'Method not allowed' })
+  } catch (e) { return res.status(500).json({ error: e.message }) }
+}
+
+// --- Funnel Builder Handlers ---
+const FUNNEL_TYPES = ['sales', 'leads', 'webinar']
+
+const COMMON_RULES_F = `
+QUY TẮC BẮT BUỘC:
+- Output PHẢI là HTML hoàn chỉnh, bắt đầu <!DOCTYPE html>, có <head> + <body>
+- KHÔNG dùng framework. Tailwind CSS qua CDN: <script src="https://cdn.tailwindcss.com"></script> trong <head>
+- Font Inter qua Google Fonts, responsive mobile-first
+- Copy TIẾNG VIỆT, KHÔNG dùng "anh/chị", chỉ dùng "bạn"
+- CTA button phải có class \`data-cta="1"\` để tracking
+- Form phải có \`data-form="1"\` và action="#"
+- Self-contained, không dùng markdown wrapper, chỉ HTML thuần
+`
+
+const FUNNEL_SYSTEM_PROMPTS = {
+  sales: `Bạn là copywriter direct-response cho sales page tiếng Việt VN. Áp dụng PAS+StoryBrand. Section: Hero→Pain→Solution→Benefits→Testimonials→Pricing→Bonuses→Guarantee→Urgency→FAQ→Final CTA. Giá charm (297k, 997k, 1.997k).${COMMON_RULES_F}`,
+  leads: `Bạn là copywriter lead magnet landing tiếng Việt. Áp dụng AIDA. Section: Hero+form→What's inside→Who for→Social proof→Author→Final CTA. Form 2 field: name+email, không phone.${COMMON_RULES_F}`,
+  webinar: `Bạn là copywriter webinar landing tiếng Việt. Section: Hero(title+date+promise)→What discover→Who for→Speaker→Agenda→Registration form(name+email+phone)→Urgency+countdown→FAQ→Final CTA.${COMMON_RULES_F}`,
+}
+
+function buildFunnelUserPrompt(type, input) {
+  const lines = [
+    `Loại funnel: ${type}`,
+    `Sản phẩm/Tên: ${input.productName || '(chưa có)'}`,
+    `Target: ${input.audience || '(chưa có)'}`,
+    `Pain: ${input.painPoints || '(chưa có)'}`,
+    `Big promise: ${input.bigPromise || '(chưa có)'}`,
+    `USP: ${input.usp || '(chưa có)'}`,
+    `CTA: ${input.cta || 'Đăng ký ngay'}`,
+  ]
+  if (input.brandColor) lines.push(`Màu chủ đạo: ${input.brandColor}`)
+  if (type === 'sales') {
+    lines.push(`Offer: ${input.offer || ''}`, `Giá: ${input.pricing || ''}`)
+    if (input.bonuses) lines.push(`Bonuses: ${input.bonuses}`)
+    if (input.guarantee) lines.push(`Guarantee: ${input.guarantee}`)
+    if (input.testimonials) lines.push(`Testimonials: ${input.testimonials}`)
+    if (input.urgency) lines.push(`Urgency: ${input.urgency}`)
+  } else if (type === 'leads') {
+    lines.push(`Lead magnet: ${input.leadMagnetName || ''}`, `Benefit: ${input.leadMagnetBenefit || ''}`)
+  } else if (type === 'webinar') {
+    lines.push(`Tên: ${input.webinarTitle || ''}`, `Ngày: ${input.webinarDate || ''}`)
+    if (input.webinarSpeaker) lines.push(`Speaker: ${input.webinarSpeaker}`)
+    if (input.webinarAgenda) lines.push(`Agenda: ${input.webinarAgenda}`)
+  }
+  lines.push('', 'Sinh HTML hoàn chỉnh. Không giải thích, không markdown, chỉ HTML.')
+  return lines.join('\n')
+}
+
+function injectFunnelTracking(html, funnelId, portalBase) {
+  const script = `
+<script>
+(function(){
+  var FUNNEL_ID='${funnelId}';
+  var TRACK_URL='${portalBase}/api/f/track';
+  function send(type, extra){
+    try {
+      fetch(TRACK_URL, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({funnel_id:FUNNEL_ID,event_type:type,referrer:document.referrer,extra:extra||{}}),keepalive:true}).catch(function(){})
+    } catch(e){}
+  }
+  send('visit');
+  document.addEventListener('click',function(e){var el=e.target.closest('[data-cta]');if(el)send('cta_click',{text:(el.innerText||'').slice(0,80)});});
+  document.addEventListener('submit',function(e){var f=e.target.closest('[data-form],form');if(f)send('form_submit',{form_id:f.id||''});},true);
+})();
+</script>`.trim()
+  return html.includes('</body>') ? html.replace('</body>', `${script}\n</body>`) : html + '\n' + script
+}
+
+async function callCodexGenerate(systemPrompt, userPrompt) {
+  const cred = await loadCredForRuntime('openai-codex')
+  const acctId = extractAccountIdFromJwt(cred.accessToken)
+  const headers = {
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${cred.accessToken}`,
+    'OpenAI-Beta': 'responses=v1',
+    'User-Agent': 'codex_cli_rs/0.0.0 (customer-portal-giftbox)',
+    'originator': 'codex_cli_rs',
+  }
+  if (acctId) headers['ChatGPT-Account-ID'] = acctId
+  const resp = await fetch(`${cred.baseUrl}/responses`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      model: 'gpt-5.6-sol',
+      instructions: systemPrompt,
+      input: [{ role: 'user', content: [{ type: 'input_text', text: userPrompt }] }],
+      max_output_tokens: 16000,
+      store: false,
+      stream: false,
+    }),
+  })
+  if (!resp.ok) {
+    const t = await resp.text().catch(() => '')
+    throw new Error(`Codex HTTP ${resp.status}: ${t.slice(0, 300)}`)
+  }
+  const data = await resp.json()
+  let text = data.output_text || ''
+  if (!text && Array.isArray(data.output)) {
+    for (const item of data.output) {
+      if (item.type === 'message' && Array.isArray(item.content)) {
+        for (const c of item.content) if (c.type === 'output_text' && c.text) text += c.text
+      }
+    }
+  }
+  return { text, usage: data.usage }
+}
+
+function extractAccountIdFromJwt(token) {
+  try {
+    const parts = token.split('.')
+    if (parts.length < 2) return null
+    const b64 = parts[1] + '='.repeat((4 - parts[1].length % 4) % 4)
+    const claims = JSON.parse(Buffer.from(b64, 'base64url').toString('utf8'))
+    return claims['https://api.openai.com/auth']?.chatgpt_account_id || null
+  } catch { return null }
+}
+
+async function handleFunnelGenerate(req, res) {
+  const user = await assertAdmin(req, res); if (!user) return
+  const { funnel_id, type, input, iteration_instruction } = req.body || {}
+  if (!FUNNEL_TYPES.includes(type)) return res.status(400).json({ error: 'type must be sales/leads/webinar' })
+  if (!input) return res.status(400).json({ error: 'input required' })
+  const db = adminDbClient()
+  let previousHtml
+  if (funnel_id && iteration_instruction) {
+    const { data: existing } = await db.from('generated_funnels').select('html').eq('id', funnel_id).maybeSingle()
+    previousHtml = existing?.html
+  }
+  const systemPrompt = FUNNEL_SYSTEM_PROMPTS[type]
+  let userPrompt
+  if (previousHtml && iteration_instruction) {
+    userPrompt = `Đây là HTML hiện tại:\n\n\`\`\`html\n${previousHtml}\n\`\`\`\n\nYêu cầu sửa: "${iteration_instruction}"\n\nSinh lại toàn bộ HTML với thay đổi này. Chỉ output HTML, không giải thích.`
+  } else {
+    userPrompt = buildFunnelUserPrompt(type, input)
+  }
+  try {
+    const result = await callCodexGenerate(systemPrompt, userPrompt)
+    let html = result.text.trim()
+    const fence = html.match(/^```(?:html)?\s*\n?([\s\S]*?)\n?```$/)
+    if (fence) html = fence[1].trim()
+    if (!html.toLowerCase().startsWith('<!doctype')) html = `<!DOCTYPE html>\n${html}`
+    return res.json({
+      html,
+      meta: {
+        provider: 'openai-codex', model: 'gpt-5.6-sol',
+        inputTokens: result.usage?.input_tokens, outputTokens: result.usage?.output_tokens,
+        generatedAt: new Date().toISOString(),
+      }
+    })
+  } catch (e) { return res.status(500).json({ error: e.message }) }
+}
+
+function slugify(s) {
+  return s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/đ/g, 'd').replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '').slice(0, 60) || 'funnel'
+}
+
+async function handleFunnelSave(req, res) {
+  const user = await assertAdmin(req, res); if (!user) return
+  const db = adminDbClient()
+  const url = new URL(req.url, 'http://localhost')
+  const id = url.searchParams.get('id')
+  const action = url.searchParams.get('action')
+  try {
+    if (req.method === 'GET') {
+      if (id) {
+        const { data, error } = await db.from('generated_funnels').select('*').eq('id', id).single()
+        if (error) return res.status(404).json({ error: error.message })
+        return res.json(data)
+      }
+      const { data } = await db.from('generated_funnels')
+        .select('id, slug, name, type, status, visits, cta_clicks, form_submits, created_at, updated_at, published_at')
+        .order('updated_at', { ascending: false })
+      return res.json({ funnels: data || [] })
+    }
+    if (req.method === 'DELETE') {
+      if (!id) return res.status(400).json({ error: 'id required' })
+      const { error } = await db.from('generated_funnels').delete().eq('id', id)
+      if (error) return res.status(500).json({ error: error.message })
+      return res.json({ success: true })
+    }
+    if (req.method === 'POST') {
+      if (action === 'publish' && id) {
+        const { data, error } = await db.from('generated_funnels').update({
+          status: 'published', published_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+        }).eq('id', id).select().single()
+        if (error) return res.status(500).json({ error: error.message })
+        return res.json(data)
+      }
+      if (action === 'archive' && id) {
+        const { data, error } = await db.from('generated_funnels').update({
+          status: 'archived', updated_at: new Date().toISOString(),
+        }).eq('id', id).select().single()
+        if (error) return res.status(500).json({ error: error.message })
+        return res.json(data)
+      }
+      const body = req.body || {}
+      if (!body.name || !body.type) return res.status(400).json({ error: 'name + type required' })
+      const slug = body.slug || slugify(body.name)
+      if (!body.id) {
+        const { data: existing } = await db.from('generated_funnels').select('id').eq('slug', slug).maybeSingle()
+        if (existing) return res.status(409).json({ error: `Slug "${slug}" đã tồn tại` })
+      }
+      const payload = {
+        slug, name: body.name, type: body.type, status: body.status || 'draft',
+        copy_input: body.copy_input || {}, html: body.html || null,
+        generation_meta: body.generation_meta || {}, custom_domain: body.custom_domain || null,
+        created_by: user.id, updated_at: new Date().toISOString(),
+      }
+      if (body.id) {
+        const { data, error } = await db.from('generated_funnels').update(payload).eq('id', body.id).select().single()
+        if (error) return res.status(500).json({ error: error.message })
+        return res.json(data)
+      } else {
+        const { data, error } = await db.from('generated_funnels').insert(payload).select().single()
+        if (error) return res.status(500).json({ error: error.message })
+        return res.json(data)
+      }
+    }
+    return res.status(405).json({ error: 'Method not allowed' })
+  } catch (e) { return res.status(500).json({ error: e.message }) }
+}
+
+async function handleFunnelPublicRender(req, res, nodeRes) {
+  const url = new URL(req.url, 'http://localhost')
+  const slug = url.searchParams.get('slug')
+  if (!slug) { nodeRes.writeHead(400); nodeRes.end('slug required'); return }
+  const db = adminDbClient()
+  const { data: funnel } = await db.from('generated_funnels')
+    .select('id, html, status, name').eq('slug', slug).maybeSingle()
+  if (!funnel || funnel.status !== 'published' || !funnel.html) {
+    nodeRes.writeHead(404, { 'Content-Type': 'text/html; charset=utf-8' })
+    nodeRes.end(`<!DOCTYPE html><meta charset=utf-8><body style="font-family:system-ui;padding:40px;background:#0a0a0a;color:#fff"><h1>404</h1><p>Funnel không tìm thấy hoặc chưa publish.</p></body>`)
+    return
+  }
+  const portalBase = process.env.CUSTOMER_PORTAL_URL || `http://${req.headers.host || 'localhost:5009'}`
+  const html = injectFunnelTracking(funnel.html, funnel.id, portalBase)
+  nodeRes.writeHead(200, {
+    'Content-Type': 'text/html; charset=utf-8',
+    'Cache-Control': 'public, max-age=60',
+  })
+  nodeRes.end(html)
+}
+
+async function handleFunnelTrack(req, res) {
+  const { funnel_id, event_type, extra, referrer } = req.body || {}
+  if (!funnel_id || !['visit', 'cta_click', 'form_submit'].includes(event_type)) {
+    return res.status(400).json({ error: 'invalid' })
+  }
+  const db = adminDbClient()
+  const ua = req.headers['user-agent'] || ''
+  const ip = (req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.headers['x-real-ip'] || 'unknown'
+  const visitorId = crypto2.createHash('sha256').update(`${ip}|${ua}`).digest('hex').slice(0, 32)
+  let utmSource, utmMedium, utmCampaign
+  try {
+    if (referrer) {
+      const ru = new URL(referrer)
+      utmSource = ru.searchParams.get('utm_source') || undefined
+      utmMedium = ru.searchParams.get('utm_medium') || undefined
+      utmCampaign = ru.searchParams.get('utm_campaign') || undefined
+    }
+  } catch {}
+  await db.from('generated_funnel_events').insert({
+    funnel_id, event_type, visitor_id: visitorId,
+    user_agent: ua.slice(0, 500), referrer: (referrer || '').slice(0, 500),
+    utm_source: utmSource, utm_medium: utmMedium, utm_campaign: utmCampaign,
+    extra: extra || {},
+  })
+  const col = event_type === 'visit' ? 'visits' : event_type === 'cta_click' ? 'cta_clicks' : 'form_submits'
+  const { data: current } = await db.from('generated_funnels').select(col).eq('id', funnel_id).maybeSingle()
+  if (current) await db.from('generated_funnels').update({ [col]: (Number(current[col]) || 0) + 1 }).eq('id', funnel_id)
+  return res.status(200).json({ ok: true })
+}
+
 // --- Email Handlers (mirror api/email/*.ts for dev + Railway) ---
 const TEMPLATES_DIR = resolve('emails/templates')
 const _tplCache = new Map()
@@ -1253,6 +1591,17 @@ const server = http.createServer(async (req, nodeRes) => {
       await handleAIModels(mockReq, res)
     } else if (req.url === '/api/ai/generate') {
       await handleAIGenerate(mockReq, res)
+    } else if (req.url?.startsWith('/api/funnel-types')) {
+      await handleFunnelTypes(mockReq, res)
+    } else if (req.url === '/api/funnels/generate') {
+      await handleFunnelGenerate(mockReq, res)
+    } else if (req.url?.startsWith('/api/funnels/save')) {
+      await handleFunnelSave(mockReq, res)
+    } else if (req.url?.startsWith('/api/f/render')) {
+      await handleFunnelPublicRender(mockReq, res, nodeRes)
+      return  // handler wrote directly to nodeRes
+    } else if (req.url === '/api/f/track') {
+      await handleFunnelTrack(mockReq, res)
     } else if (req.url === '/api/email/send') {
       await handleEmailSend(mockReq, res)
     } else if (req.url === '/api/email/broadcast') {

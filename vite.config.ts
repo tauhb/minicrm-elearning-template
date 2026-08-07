@@ -8,6 +8,15 @@ export default defineConfig({
     host: '0.0.0.0',
     proxy: {
       '/api': 'http://localhost:3001',
+      '/f': {
+        target: 'http://localhost:3001',
+        rewrite: (path) => {
+          // /f/khoa-ai-marketing → /api/f/render?slug=khoa-ai-marketing
+          const m = path.match(/^\/f\/([^/?]+)/)
+          if (!m) return path
+          return `/api/f/render?slug=${encodeURIComponent(m[1])}`
+        },
+      },
     },
   },
   plugins: [react()],

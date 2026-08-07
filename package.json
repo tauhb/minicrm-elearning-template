@@ -19,7 +19,8 @@
     "sounds:generate": "node scripts/generate-sounds.mjs",
     "portal:rebrand": "node scripts/rebrand.mjs",
     "portal:add-course": "node scripts/add-course.mjs",
-    "portal:verify-deploy": "node scripts/verify-deploy.mjs"
+    "portal:verify-deploy": "node scripts/verify-deploy.mjs",
+    "seed:funnel-types": "node scripts/seed-funnel-types.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.105.4",

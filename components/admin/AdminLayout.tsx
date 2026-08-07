@@ -11,7 +11,7 @@ import OrdersView from './OrdersView'
 import ProductsLayout from './ProductsLayout'
 import SettingsView from './SettingsView'
 import AffiliatesView from './AffiliatesView'
-import AISettingsView from './AISettingsView'
+import AIFunnelsView from './AIFunnelsView'
 
 const NAV_ITEMS = [
   { to: '/admin',          label: 'Tổng quan',      icon: LayoutDashboard, end: true },
@@ -21,7 +21,7 @@ const NAV_ITEMS = [
   { to: '/admin/students', label: 'Khách hàng',     icon: Users },
   { to: '/admin/products',   label: 'Sản phẩm',    icon: Package },
   { to: '/admin/affiliates', label: 'Affiliate',    icon: Share2 },
-  { to: '/admin/ai',       label: 'AI Providers',   icon: Sparkles },
+  { to: '/admin/ai-funnels', label: 'AI Funnels',   icon: Sparkles },
   { to: '/admin/settings', label: 'Cài đặt',        icon: Settings },
 ]
 
@@ -146,7 +146,7 @@ const AdminLayout: React.FC = () => {
           <Route path="orders"     element={<OrdersView />} />
           <Route path="products/*"  element={<ProductsLayout />} />
           <Route path="affiliates" element={<AffiliatesView />} />
-          <Route path="ai"         element={<AISettingsView />} />
+          <Route path="ai-funnels" element={<AIFunnelsView />} />
           <Route path="settings"   element={<SettingsView />} />
           <Route path="*"          element={<Navigate to="/admin" replace />} />
         </Routes>
