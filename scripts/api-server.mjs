@@ -1076,8 +1076,8 @@ async function handleAIGenerate(req, res) {
 // Maps /api/foo/bar → api/foo/bar.ts OR api/foo/bar/index.ts
 async function handleViaImport(req, res, urlPath) {
   // Strip query string
-  const cleanPath = urlPath.split('?')[0]  // e.g. /api/funnel-steps
-  const relPath = cleanPath.replace(/^\/api\//, '')  // funnel-steps
+  const cleanPath = urlPath.split('?')[0].replace(/\.(js|css|json|html|txt)$/i, '')
+  const relPath = cleanPath.replace(/^\/api\//, '')
   const parts = relPath.split('/').filter(Boolean)
 
   // Try: api/<parts>.ts, api/<parts>/index.ts
