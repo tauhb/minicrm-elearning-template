@@ -14,7 +14,13 @@
 
 import React, { useEffect, useState } from 'react'
 import { supabase } from '../../services/supabase'
-import { Sparkles, Loader2 } from 'lucide-react'
+import { Sparkles, Loader2, RefreshCw } from 'lucide-react'
+
+// Cross-instance in-memory cache: fetching /list-models is 1-2s per call, and multiple
+// ProviderPicker instances (Distill + Auto-reply + Funnel step) end up asking for the
+// same provider back-to-back. Cache lives for the tab session — cleared on hard reload.
+const modelsCache = new Map<string, { models: string[]; ts: number }>()
+const CACHE_TTL_MS = 5 * 60 * 1000   // 5 min — fresh enough for user perception
 
 export interface UsableProvider {
   id: string
@@ -64,7 +70,57 @@ export function ProviderPicker({
   }, [])
 
   const selected = value ? providers.find(p => p.id === value) : undefined
-  const modelOptions = selected?.suggested_models || []
+
+  // Live models — fetched from the provider's own /models endpoint on demand.
+  // Falls back to registry suggested_models on error. In-memory cache dedupes
+  // concurrent instances of ProviderPicker.
+  const [liveModels, setLiveModels] = useState<string[] | null>(null)
+  const [modelsLoading, setModelsLoading] = useState(false)
+  const [modelsError, setModelsError] = useState<string | null>(null)
+  const [fetchedAt, setFetchedAt] = useState<Date | null>(null)
+
+  const fetchModels = React.useCallback(async (pid: string, force = false) => {
+    // Cache check
+    const cached = modelsCache.get(pid)
+    if (!force && cached && Date.now() - cached.ts < CACHE_TTL_MS) {
+      setLiveModels(cached.models)
+      setFetchedAt(new Date(cached.ts))
+      return
+    }
+    setModelsLoading(true); setModelsError(null)
+    try {
+      const r = await fetch(`/api/ai-providers?action=list-models&id=${encodeURIComponent(pid)}`, {
+        method: 'POST', body: '{}',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(await (async () => {
+            const { data: { session } } = await supabase.auth.getSession()
+            return session ? { Authorization: `Bearer ${session.access_token}` } : {}
+          })()),
+        },
+      })
+      const data = await r.json().catch(() => ({}))
+      if (!r.ok || !Array.isArray(data.models)) {
+        throw new Error(data.error || `HTTP ${r.status}`)
+      }
+      modelsCache.set(pid, { models: data.models, ts: Date.now() })
+      setLiveModels(data.models)
+      setFetchedAt(new Date())
+    } catch (e: any) {
+      setModelsError(e.message || 'Không lấy được list models')
+      setLiveModels(null)   // fall back to suggested_models via modelOptions below
+    } finally {
+      setModelsLoading(false)
+    }
+  }, [])
+
+  // Auto-fetch when a real provider is selected (skip when value=undefined = auto)
+  useEffect(() => {
+    if (!selected) { setLiveModels(null); setFetchedAt(null); setModelsError(null); return }
+    fetchModels(selected.id).catch(() => {})
+  }, [selected?.id, fetchModels])
+
+  const modelOptions = liveModels ?? selected?.suggested_models ?? []
 
   const size = compact ? 'text-xs py-1 px-2' : 'text-sm py-1.5 px-2.5'
 
@@ -107,24 +163,52 @@ export function ProviderPicker({
               </option>
             ))}
           </select>
-          {showModelPicker && selected && modelOptions.length > 0 && onModelChange && (
-            <select
-              value={model || selected.default_model}
-              onChange={e => onModelChange(e.target.value)}
-              className={`${size} bg-neutral-900 border border-neutral-800 rounded text-white`}
-              title="Model để dùng cho provider này"
-            >
-              {modelOptions.map(m => <option key={m} value={m}>{m}</option>)}
-              {model && !modelOptions.includes(model) && (
-                <option value={model}>{model} (custom)</option>
-              )}
-            </select>
+          {showModelPicker && selected && onModelChange && (
+            <div className="flex items-center gap-1.5 flex-1 min-w-0">
+              <select
+                value={model || selected.default_model}
+                onChange={e => onModelChange(e.target.value)}
+                disabled={modelsLoading}
+                className={`${size} bg-neutral-900 border border-neutral-800 rounded text-white flex-1 min-w-0`}
+                title={liveModels
+                  ? `Live: ${liveModels.length} models từ provider (fetched ${fetchedAt?.toLocaleTimeString('vi-VN') || ''})`
+                  : 'Suggested list (chưa fetch từ provider)'}
+              >
+                {modelsLoading && modelOptions.length === 0 && <option>Đang tải models...</option>}
+                {modelOptions.map(m => <option key={m} value={m}>{m}</option>)}
+                {model && !modelOptions.includes(model) && (
+                  <option value={model}>{model} (custom)</option>
+                )}
+              </select>
+              <button
+                type="button"
+                onClick={(e) => { e.preventDefault(); if (selected) fetchModels(selected.id, true) }}
+                disabled={modelsLoading}
+                className={`${compact ? 'p-1' : 'p-1.5'} rounded border border-neutral-800 text-neutral-500 hover:text-white hover:border-neutral-600 disabled:opacity-40`}
+                title={liveModels ? `Refresh (fetched ${fetchedAt?.toLocaleTimeString('vi-VN') || ''})` : 'Fetch live list from provider'}
+              >
+                {modelsLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+              </button>
+            </div>
           )}
         </div>
       )}
       {value === undefined && providers.length > 0 && (
         <p className="text-[10px] text-neutral-600">
           Auto: dùng {providers.find(p => p.is_default)?.label || providers[0]?.label} (default trong Cài đặt → AI Providers).
+        </p>
+      )}
+      {selected && (
+        <p className="text-[10px] flex items-center gap-1.5">
+          {modelsLoading ? (
+            <span className="text-neutral-500 flex items-center gap-1"><Loader2 className="w-2.5 h-2.5 animate-spin" /> Fetching models từ {selected.label}…</span>
+          ) : liveModels ? (
+            <span className="text-green-500">✓ {liveModels.length} models live từ {selected.label}{fetchedAt ? ` · ${Math.max(0, Math.round((Date.now() - fetchedAt.getTime()) / 1000))}s trước` : ''}</span>
+          ) : modelsError ? (
+            <span className="text-amber-500" title={modelsError}>⚠ Dùng suggested list ({modelOptions.length}) — provider không trả /models: {modelsError.slice(0, 60)}</span>
+          ) : (
+            <span className="text-neutral-600">📋 {modelOptions.length} suggested models</span>
+          )}
         </p>
       )}
     </div>
