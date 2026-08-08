@@ -145,7 +145,7 @@ const StudentPortal = () => {
   }
 
   const handleQuestSelect = (quest: Quest) => {
-    const isAdmin = profile?.role === 'admin'
+    const isAdmin = ['owner', 'admin', 'sales', 'support'].includes(profile?.role || '')
     const isUnlockedByProgress = quest.id <= progress.currentDay
     const isUnlockedByTime = quest.id <= maxAllowedDay
     const isCompleted = progress.completedQuests.includes(quest.id)
@@ -213,7 +213,7 @@ const StudentPortal = () => {
   const actualCurrentDay = Math.min(progress.currentDay, maxAllowedDay)
   const currentQuestData = quests.find(q => q.id === actualCurrentDay)
   const streak = progress.streak || 0
-  const isAdmin = profile?.role === 'admin'
+  const isAdmin = ['owner', 'admin', 'sales', 'support'].includes(profile?.role || '')
 
   // Build legacy-compatible Student shape for child components
   const student: Student = profile ? profileToStudent(profile, primaryEnrollment) : {
@@ -575,7 +575,8 @@ const AuthenticatedApp = () => {
     return <LoginScreen onLoginSuccess={setProfile} />
   }
 
-  const isAdmin = profile.role === 'admin' || profile.role === 'sales'
+  // Wave 0 expanded roles: owner/admin/sales/support all get admin panel access.
+  const isAdmin = ['owner', 'admin', 'sales', 'support'].includes(profile.role)
   const isAffiliateOnly = profile.role === 'affiliate'
 
   // Affiliate-only users: chỉ có quyền vào /affiliate dashboard
