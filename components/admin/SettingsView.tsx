@@ -232,45 +232,76 @@ const SettingsView: React.FC = () => {
     </button>
   )
 
-  return (
-    <div className="p-8 max-w-7xl mx-auto">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-white">Cài đặt</h1>
-        <p className="text-gray-500 text-sm mt-1">Cấu hình cổng học viên</p>
-      </div>
+  // Sidebar tabs grouped by domain for scannability. Order = display order.
+  const TABS: Array<{ key: Tab; label: string; icon: React.FC<any>; group: string }> = [
+    { key: 'team',          label: 'Đội ngũ',           icon: Users,         group: 'Vận hành' },
+    { key: 'api-tokens',    label: 'API Tokens',        icon: KeyRound,      group: 'Vận hành' },
+    { key: 'chat-snippets', label: 'Chat snippets',     icon: MessageSquare, group: 'Chat' },
+    { key: 'webhook',       label: 'Webhook & Delivery',icon: Webhook,       group: 'Tích hợp' },
+    { key: 'email',         label: 'Email',             icon: Mail,          group: 'Tích hợp' },
+    { key: 'ai',            label: 'AI Providers',      icon: Sparkles,      group: 'Tích hợp' },
+    { key: 'funnel-types',  label: 'Funnel Types',      icon: Layers,        group: 'Funnel' },
+    { key: 'copy-formulas', label: 'Copy Formulas',     icon: PenLine,       group: 'Funnel' },
+    { key: 'health',        label: 'Health check',      icon: Activity,      group: 'Hệ thống' },
+    { key: 'general',       label: 'Chung',             icon: Sliders,       group: 'Hệ thống' },
+  ]
+  const groupOrder = ['Vận hành', 'Chat', 'Tích hợp', 'Funnel', 'Hệ thống']
 
-      {/* Tabs */}
-      <div className="flex gap-1 mb-6 border-b border-gray-800">
-        {([
-          { key: 'team', label: 'Đội ngũ', icon: Users },
-          { key: 'chat-snippets', label: 'Chat snippets', icon: MessageSquare },
-          { key: 'webhook', label: 'Webhook & Delivery', icon: Webhook },
-          { key: 'email', label: 'Email', icon: Mail },
-          { key: 'ai', label: 'AI Providers', icon: Sparkles },
-          { key: 'funnel-types', label: 'Funnel Types', icon: Layers },
-          { key: 'copy-formulas', label: 'Copy Formulas', icon: PenLine },
-          { key: 'health', label: 'Health check', icon: Activity },
-          { key: 'api-tokens', label: 'API Tokens', icon: KeyRound },
-          { key: 'general', label: 'Chung', icon: Sliders },
-        ] as { key: Tab; label: string; icon: React.FC<any> }[]).map(tab => (
-          <button
-            key={tab.key}
-            onClick={() => {
-              setActiveTab(tab.key)
-              if (typeof window !== 'undefined') {
-                history.replaceState(null, '', `#${tab.key}`)
-              }
-            }}
-            className={`flex items-center gap-2 px-4 py-2 text-sm border-b-2 transition-all -mb-px ${activeTab === tab.key ? '' : 'border-transparent text-gray-500 hover:text-white'}`}
-            style={activeTab === tab.key ? {
-              borderColor: 'var(--color-mission-accent)',
-              color: 'var(--color-mission-accent)',
-            } : undefined}
-          >
-            <tab.icon size={14} />{tab.label}
-          </button>
-        ))}
-      </div>
+  return (
+    <div className="h-full flex">
+      {/* Left sidebar */}
+      <aside className="w-64 border-r border-gray-800 bg-gray-950 flex flex-col shrink-0 overflow-y-auto">
+        <div className="p-5 border-b border-gray-800">
+          <h1 className="text-lg font-bold text-white">Cài đặt</h1>
+          <p className="text-xs text-gray-500 mt-0.5">Cấu hình cổng học viên</p>
+        </div>
+        <nav className="flex-1 p-3 space-y-4">
+          {groupOrder.map(group => (
+            <div key={group}>
+              <p className="text-[10px] uppercase tracking-widest text-gray-600 px-2 mb-1.5">{group}</p>
+              <div className="space-y-0.5">
+                {TABS.filter(t => t.group === group).map(tab => {
+                  const active = activeTab === tab.key
+                  return (
+                    <button
+                      key={tab.key}
+                      onClick={() => {
+                        setActiveTab(tab.key)
+                        if (typeof window !== 'undefined') history.replaceState(null, '', `#${tab.key}`)
+                      }}
+                      className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-all border"
+                      style={active ? {
+                        backgroundColor: 'rgba(var(--color-mission-accent-rgb, 182, 255, 0), 0.12)',
+                        borderColor: 'rgba(var(--color-mission-accent-rgb, 182, 255, 0), 0.3)',
+                        color: 'var(--color-mission-accent)',
+                      } : { color: '#9ca3af', borderColor: 'transparent' }}
+                      onMouseEnter={e => {
+                        if (!active) {
+                          (e.currentTarget as HTMLElement).style.color = '#fff'
+                          ;(e.currentTarget as HTMLElement).style.backgroundColor = 'rgba(255,255,255,0.04)'
+                        }
+                      }}
+                      onMouseLeave={e => {
+                        if (!active) {
+                          (e.currentTarget as HTMLElement).style.color = '#9ca3af'
+                          ;(e.currentTarget as HTMLElement).style.backgroundColor = 'transparent'
+                        }
+                      }}
+                    >
+                      <tab.icon size={14} />
+                      <span>{tab.label}</span>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          ))}
+        </nav>
+      </aside>
+
+      {/* Right content */}
+      <div className="flex-1 overflow-y-auto">
+        <div className="p-8 max-w-5xl">
 
       {activeTab === 'team' && <TeamView />}
       {activeTab === 'chat-snippets' && <ChatSnippetsView />}
@@ -909,6 +940,8 @@ async function provisionAfterPayment(payment) {
           </div>
         </div>
       )}
+        </div>{/* /p-8 max-w-5xl */}
+      </div>{/* /flex-1 overflow-y-auto */}
     </div>
   )
 }
