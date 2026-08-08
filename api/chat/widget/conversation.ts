@@ -182,6 +182,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }).select('id, created_at').single()
 
     if (error) return res.status(500).json({ error: error.message })
+
+    // Sprint D — fire auto-reply (non-blocking; caller returns immediately, bot reply
+    // appears on widget's next poll cycle). Wrap in try/catch so bot failure never
+    // breaks the visitor's message send.
+    try {
+      const { maybeReply } = await import('../../../services/chat-bot')
+      maybeReply(session.conversation_id).catch(e => console.warn('[chat-bot]', e?.message))
+    } catch (e: any) {
+      console.warn('[chat-bot import]', e?.message)
+    }
+
     return res.json({ message_id: msg.id, created_at: msg.created_at })
   }
 

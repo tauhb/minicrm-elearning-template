@@ -210,6 +210,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       attachments: msg.photo || msg.document ? [{ raw: msg.photo || msg.document }] : [],
     })
 
+    // Sprint D — fire auto-reply (non-blocking; worker will send it via Telegram API).
+    // Telegram expects a 200 quickly, so we don't await.
+    try {
+      const { maybeReply } = await import('../../../services/chat-bot')
+      maybeReply(conv.id).catch(e => console.warn('[chat-bot tg]', e?.message))
+    } catch (e: any) { console.warn('[chat-bot tg import]', e?.message) }
+
     return res.status(200).json({ ok: true })
   } catch (e: any) {
     console.error('[telegram/webhook]', e)

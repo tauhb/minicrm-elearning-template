@@ -48,7 +48,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return res.json(data)
       }
       const { data } = await admin.from('chat_inboxes')
-        .select('id, name, channel_type, channel_config, external_id, website_token, is_active, greeting_enabled, greeting_message, auto_assign_to, created_at, updated_at')
+        .select('id, name, channel_type, channel_config, external_id, website_token, is_active, greeting_enabled, greeting_message, auto_assign_to, auto_reply_enabled, auto_reply_config, created_at, updated_at')
         .order('created_at', { ascending: false })
       return res.json({ inboxes: data || [] })
     }
@@ -87,6 +87,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         timezone: body.timezone || 'Asia/Ho_Chi_Minh',
         auto_assign_to: body.auto_assign_to || null,
         is_active: body.is_active !== false,
+        // Sprint D — auto-reply bot config
+        auto_reply_enabled: !!body.auto_reply_enabled,
+        auto_reply_config: body.auto_reply_config || {},
         updated_at: new Date().toISOString(),
       }
       if (body.id) {

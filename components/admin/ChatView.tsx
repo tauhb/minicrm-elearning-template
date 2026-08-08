@@ -19,6 +19,12 @@ interface Inbox {
   website_token: string; is_active: boolean; auto_assign_to?: string | null
   greeting_enabled?: boolean; greeting_message?: string
   external_id?: string | null
+  // Sprint D
+  auto_reply_enabled?: boolean
+  auto_reply_config?: {
+    kb_ids?: string[]; persona?: string; min_score?: number; max_turns?: number
+    handoff_phrase?: string; provider_id?: string; model?: string
+  }
 }
 
 // Channels visible in the picker + their icons/labels. Keep in sync with
@@ -916,6 +922,58 @@ function InboxManagerModal({ inboxes, onClose, onSaved }: { inboxes: Inbox[]; on
               onChange={e => setEditing(prev => ({ ...prev, is_active: e.target.checked }))} />
             Active
           </label>
+
+          {/* Sprint D — Auto-reply bot config */}
+          <div className="border-t border-neutral-800 pt-3 space-y-2">
+            <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={!!(editing as any).auto_reply_enabled}
+                onChange={e => setEditing(prev => ({ ...prev, auto_reply_enabled: e.target.checked } as any))} />
+              <span className="font-semibold">🤖 Bật auto-reply (bot AI)</span>
+            </label>
+            {(editing as any).auto_reply_enabled && (
+              <div className="pl-6 space-y-2 border-l border-neutral-800">
+                <div>
+                  <label className="text-xs text-neutral-500 block mb-1">Kho kiến thức để bot dùng (comma-separated UUIDs — sẽ có picker sau)</label>
+                  <input type="text"
+                    value={(((editing as any).auto_reply_config?.kb_ids || []) as string[]).join(', ')}
+                    onChange={e => setEditing(prev => ({
+                      ...prev,
+                      auto_reply_config: { ...((prev as any).auto_reply_config || {}), kb_ids: e.target.value.split(',').map(s => s.trim()).filter(Boolean) }
+                    } as any))}
+                    placeholder="uuid1, uuid2"
+                    className="w-full px-2 py-1 bg-neutral-950 border border-neutral-800 rounded text-xs font-mono" />
+                </div>
+                <div>
+                  <label className="text-xs text-neutral-500 block mb-1">Persona (system prompt)</label>
+                  <textarea rows={2}
+                    value={(editing as any).auto_reply_config?.persona || ''}
+                    onChange={e => setEditing(prev => ({ ...prev, auto_reply_config: { ...((prev as any).auto_reply_config || {}), persona: e.target.value } } as any))}
+                    placeholder="Bạn là trợ lý AI của khoá X, trả lời ngắn gọn tiếng Việt, dùng 'bạn'..."
+                    className="w-full px-2 py-1 bg-neutral-950 border border-neutral-800 rounded text-xs" />
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-xs text-neutral-500 block mb-1">Ngưỡng tin cậy (0-1)</label>
+                    <input type="number" step="0.05" min="0" max="1"
+                      value={(editing as any).auto_reply_config?.min_score ?? 0.6}
+                      onChange={e => setEditing(prev => ({ ...prev, auto_reply_config: { ...((prev as any).auto_reply_config || {}), min_score: Number(e.target.value) } } as any))}
+                      className="w-full px-2 py-1 bg-neutral-950 border border-neutral-800 rounded text-xs" />
+                  </div>
+                  <div>
+                    <label className="text-xs text-neutral-500 block mb-1">Max lượt (rồi chuyển agent)</label>
+                    <input type="number" min="1" max="100"
+                      value={(editing as any).auto_reply_config?.max_turns ?? 20}
+                      onChange={e => setEditing(prev => ({ ...prev, auto_reply_config: { ...((prev as any).auto_reply_config || {}), max_turns: Number(e.target.value) } } as any))}
+                      className="w-full px-2 py-1 bg-neutral-950 border border-neutral-800 rounded text-xs" />
+                  </div>
+                </div>
+                <p className="text-[10px] text-neutral-600">
+                  Bot dùng RAG (Kho kiến thức) + AI provider mặc định. Khách nói "chuyển agent" → bot im. Sau khi human agent trả lời → bot im vĩnh viễn.
+                </p>
+              </div>
+            )}
+          </div>
+
           <div className="flex justify-end gap-2 pt-3 border-t border-neutral-800">
             <button onClick={() => setEditing(null)} className="text-sm text-neutral-500 hover:text-white px-3">Huỷ</button>
             <button onClick={save} disabled={saving}
