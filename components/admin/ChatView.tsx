@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
-import { MessageCircle, Send, Loader2, Circle, CheckCircle2, User, Mail, Phone, Tag, ExternalLink, Inbox as InboxIcon, StickyNote, MoreVertical, Filter, Settings, Copy, Check, ArrowRight, UserPlus, Zap } from 'lucide-react'
+import { MessageCircle, Send, Loader2, Circle, CheckCircle2, User, Mail, Phone, Tag, ExternalLink, Inbox as InboxIcon, StickyNote, MoreVertical, Filter, Settings, Copy, Check, ArrowRight, UserPlus, Zap, Globe, Send as SendIcon, MessageSquare, Facebook, AtSign, Wifi, WifiOff, AlertTriangle } from 'lucide-react'
 import { supabase } from '../../services/supabase'
 import { fetchPipelineStages } from '../../services/api'
 import type { Lead, PipelineStage, Profile } from '../../types'
@@ -18,7 +18,21 @@ interface Inbox {
   id: string; name: string; channel_type: string; channel_config: any
   website_token: string; is_active: boolean; auto_assign_to?: string | null
   greeting_enabled?: boolean; greeting_message?: string
+  external_id?: string | null
 }
+
+// Channels visible in the picker + their icons/labels. Keep in sync with
+// migration 021's CHECK constraint.
+const CHANNEL_META: Record<string, { label: string; Icon: any; color: string; needsWorker: boolean }> = {
+  website:  { label: 'Website widget',      Icon: Globe,         color: 'text-neutral-300', needsWorker: false },
+  telegram: { label: 'Telegram bot',        Icon: SendIcon,      color: 'text-sky-400',    needsWorker: false },
+  zalo:     { label: 'Zalo',                Icon: MessageSquare, color: 'text-blue-400',   needsWorker: true  },
+  facebook: { label: 'Facebook (stub)',     Icon: Facebook,      color: 'text-blue-500',   needsWorker: true  },
+  email:    { label: 'Email (stub)',        Icon: AtSign,        color: 'text-amber-400',  needsWorker: true  },
+  // Legacy — still accepted by the DB, aliased to website in the UI:
+  web_widget: { label: 'Website widget (legacy)', Icon: Globe, color: 'text-neutral-500', needsWorker: false },
+}
+
 interface Contact {
   type: 'lead' | 'customer'
   id: string; email: string
@@ -61,6 +75,15 @@ export default function ChatView() {
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState({ status: 'open', assignee: '' as '' | 'me' | 'unassigned', inbox_id: '' })
   const [inboxManagerOpen, setInboxManagerOpen] = useState(false)
+  const [workerBeat, setWorkerBeat] = useState<{ any: boolean; ageMs: number | null; channels: string[] }>({ any: false, ageMs: null, channels: [] })
+
+  // Whether ANY inbox needs a worker (zalo / facebook / email). If not, we
+  // suppress the amber "no worker" badge entirely — nothing to run.
+  const workerNeeded = useMemo(
+    () => inboxes.some(i => CHANNEL_META[i.channel_type]?.needsWorker && i.is_active),
+    [inboxes]
+  )
+
 
   // Cross-links: open Lead / Student drawer from contact sidebar
   const [leadDrawer, setLeadDrawer] = useState<Lead | null>(null)
@@ -193,6 +216,30 @@ export default function ChatView() {
   useEffect(() => { loadInboxes() }, [loadInboxes])
   useEffect(() => { loadList() }, [loadList])
 
+  // Worker heartbeat poll — polled straight from Supabase (RLS: admin/sales
+  // policy on worker_heartbeats). Cheap 1-row select every 20s.
+  useEffect(() => {
+    let alive = true
+    const check = async () => {
+      const { data } = await supabase
+        .from('worker_heartbeats')
+        .select('last_beat_at, channels')
+        .order('last_beat_at', { ascending: false })
+        .limit(1)
+      if (!alive) return
+      if (!data || data.length === 0) {
+        setWorkerBeat({ any: false, ageMs: null, channels: [] })
+      } else {
+        const row = data[0] as any
+        const age = Date.now() - new Date(row.last_beat_at).getTime()
+        setWorkerBeat({ any: true, ageMs: age, channels: row.channels || [] })
+      }
+    }
+    check()
+    const h = setInterval(check, 20_000)
+    return () => { alive = false; clearInterval(h) }
+  }, [])
+
   // Realtime: subscribe to new messages in ANY conversation → refresh list preview
   useEffect(() => {
     const channel = supabase
@@ -231,6 +278,7 @@ export default function ChatView() {
           {inboxes.map(i => <option key={i.id} value={i.id}>{i.name}</option>)}
         </select>
         <div className="flex-1" />
+        {workerNeeded && <WorkerStatusPill beat={workerBeat} />}
         <button onClick={() => setInboxManagerOpen(true)}
           className="p-1.5 hover:bg-neutral-800 rounded" title="Manage inboxes">
           <Settings className="w-4 h-4" />
@@ -673,6 +721,45 @@ function ConversationDetail({
   )
 }
 
+// ══════════════════════════════════════════════════════════════════════════
+// WORKER STATUS PILL
+// ══════════════════════════════════════════════════════════════════════════
+function WorkerStatusPill({ beat }: { beat: { any: boolean; ageMs: number | null; channels: string[] } }) {
+  const healthy = beat.any && beat.ageMs !== null && beat.ageMs < 60_000
+  if (!beat.any) {
+    return (
+      <span
+        title="Worker chưa chạy — Zalo/Facebook/Email sẽ không hoạt động. Xem worker/README.md để deploy."
+        className="flex items-center gap-1.5 px-2 py-1 rounded border border-amber-500/40 bg-amber-500/10 text-amber-300 text-[10px]"
+      >
+        <WifiOff className="w-3 h-3" />
+        Worker offline
+      </span>
+    )
+  }
+  if (healthy) {
+    return (
+      <span
+        title={`Worker healthy — channels: ${beat.channels.join(', ')}`}
+        className="flex items-center gap-1.5 px-2 py-1 rounded border border-green-500/40 bg-green-500/10 text-green-400 text-[10px]"
+      >
+        <Wifi className="w-3 h-3" />
+        Worker online
+      </span>
+    )
+  }
+  const secs = beat.ageMs !== null ? Math.round(beat.ageMs / 1000) : '?'
+  return (
+    <span
+      title={`Last heartbeat ${secs}s ago — worker may be lagging or restarted.`}
+      className="flex items-center gap-1.5 px-2 py-1 rounded border border-amber-500/40 bg-amber-500/10 text-amber-300 text-[10px]"
+    >
+      <AlertTriangle className="w-3 h-3" />
+      Worker stale ({secs}s)
+    </span>
+  )
+}
+
 function MessageBubble({ m }: { m: Message }) {
   const isContact = m.sender_type === 'contact'
   const isSystem = m.sender_type === 'system'
@@ -742,45 +829,77 @@ function InboxManagerModal({ inboxes, onClose, onSaved }: { inboxes: Inbox[]; on
           </div>
           <div>
             <label className="text-xs text-neutral-500 uppercase tracking-wider block mb-1">Channel</label>
-            <select value={editing.channel_type || 'web_widget'} onChange={e => setEditing(prev => ({ ...prev, channel_type: e.target.value }))}
+            <select value={editing.channel_type || 'website'} onChange={e => setEditing(prev => ({ ...prev, channel_type: e.target.value, channel_config: prev?.channel_config || {} }))}
               className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 rounded text-sm">
-              <option value="web_widget">Website Widget</option>
-              <option value="email">Email (coming soon)</option>
-              <option value="facebook">Facebook (coming soon)</option>
-              <option value="zalo">Zalo OA (coming soon)</option>
+              <option value="website">Website widget</option>
+              <option value="telegram">Telegram bot</option>
+              <option value="zalo">Zalo</option>
+              <option value="facebook">Facebook (stub)</option>
+              <option value="email">Email (stub)</option>
             </select>
+            {(editing.channel_type && CHANNEL_META[editing.channel_type]?.needsWorker) && (
+              <div className="mt-2 flex items-start gap-2 px-2.5 py-2 rounded border border-amber-500/30 bg-amber-500/5 text-[11px] text-amber-200/90">
+                <AlertTriangle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
+                <div>
+                  Kênh này cần <strong>worker service</strong> chạy song song (Docker/Railway/VPS).
+                  CRM trên Vercel không giữ được kết nối lâu. Xem <code>worker/README.md</code> để deploy.
+                </div>
+              </div>
+            )}
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="text-xs text-neutral-500 uppercase tracking-wider block mb-1">Widget color</label>
-              <input type="color" value={(editing.channel_config as any)?.widget_color || '#B6FF00'}
-                onChange={e => setEditing(prev => ({ ...prev, channel_config: { ...(prev?.channel_config || {}), widget_color: e.target.value }}))}
-                className="w-full h-9 bg-neutral-950 border border-neutral-800 rounded" />
-            </div>
-            <div>
-              <label className="text-xs text-neutral-500 uppercase tracking-wider block mb-1">Position</label>
-              <select value={(editing.channel_config as any)?.position || 'bottom-right'}
-                onChange={e => setEditing(prev => ({ ...prev, channel_config: { ...(prev?.channel_config || {}), position: e.target.value }}))}
-                className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 rounded text-sm">
-                <option value="bottom-right">Bottom right</option>
-                <option value="bottom-left">Bottom left</option>
-              </select>
-            </div>
-          </div>
-          <div>
-            <label className="text-xs text-neutral-500 uppercase tracking-wider block mb-1">Welcome title</label>
-            <input value={(editing.channel_config as any)?.welcome_title || ''}
-              onChange={e => setEditing(prev => ({ ...prev, channel_config: { ...(prev?.channel_config || {}), welcome_title: e.target.value }}))}
-              placeholder="Chào bạn 👋"
-              className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 rounded text-sm" />
-          </div>
-          <div>
-            <label className="text-xs text-neutral-500 uppercase tracking-wider block mb-1">Welcome tagline</label>
-            <input value={(editing.channel_config as any)?.welcome_tagline || ''}
-              onChange={e => setEditing(prev => ({ ...prev, channel_config: { ...(prev?.channel_config || {}), welcome_tagline: e.target.value }}))}
-              placeholder="Chúng tôi sẵn sàng hỗ trợ bạn"
-              className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 rounded text-sm" />
-          </div>
+
+          {/* Per-channel config panels — website uses the existing widget
+              config below; Telegram/Zalo/FB/Email each render their own. */}
+          {editing.channel_type === 'telegram' && (
+            <TelegramConfigPanel editing={editing} setEditing={setEditing} />
+          )}
+          {editing.channel_type === 'zalo' && (
+            <ZaloConfigPanel editing={editing} setEditing={setEditing} />
+          )}
+          {editing.channel_type === 'facebook' && (
+            <FacebookConfigPanel editing={editing} setEditing={setEditing} />
+          )}
+          {editing.channel_type === 'email' && (
+            <EmailConfigPanel editing={editing} setEditing={setEditing} />
+          )}
+
+          {/* Website-only visual config — hidden for external channels
+              where these fields are meaningless. */}
+          {(editing.channel_type === 'website' || editing.channel_type === 'web_widget' || !editing.channel_type) && (
+            <>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-neutral-500 uppercase tracking-wider block mb-1">Widget color</label>
+                  <input type="color" value={(editing.channel_config as any)?.widget_color || '#B6FF00'}
+                    onChange={e => setEditing(prev => ({ ...prev, channel_config: { ...(prev?.channel_config || {}), widget_color: e.target.value }}))}
+                    className="w-full h-9 bg-neutral-950 border border-neutral-800 rounded" />
+                </div>
+                <div>
+                  <label className="text-xs text-neutral-500 uppercase tracking-wider block mb-1">Position</label>
+                  <select value={(editing.channel_config as any)?.position || 'bottom-right'}
+                    onChange={e => setEditing(prev => ({ ...prev, channel_config: { ...(prev?.channel_config || {}), position: e.target.value }}))}
+                    className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 rounded text-sm">
+                    <option value="bottom-right">Bottom right</option>
+                    <option value="bottom-left">Bottom left</option>
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label className="text-xs text-neutral-500 uppercase tracking-wider block mb-1">Welcome title</label>
+                <input value={(editing.channel_config as any)?.welcome_title || ''}
+                  onChange={e => setEditing(prev => ({ ...prev, channel_config: { ...(prev?.channel_config || {}), welcome_title: e.target.value }}))}
+                  placeholder="Chào bạn 👋"
+                  className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 rounded text-sm" />
+              </div>
+              <div>
+                <label className="text-xs text-neutral-500 uppercase tracking-wider block mb-1">Welcome tagline</label>
+                <input value={(editing.channel_config as any)?.welcome_tagline || ''}
+                  onChange={e => setEditing(prev => ({ ...prev, channel_config: { ...(prev?.channel_config || {}), welcome_tagline: e.target.value }}))}
+                  placeholder="Chúng tôi sẵn sàng hỗ trợ bạn"
+                  className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 rounded text-sm" />
+              </div>
+            </>
+          )}
           <div>
             <label className="text-xs text-neutral-500 uppercase tracking-wider block mb-1">Greeting message (auto-send on new conversation)</label>
             <textarea value={editing.greeting_message || ''} onChange={e => setEditing(prev => ({ ...prev, greeting_message: e.target.value }))}
@@ -820,7 +939,7 @@ function InboxManagerModal({ inboxes, onClose, onSaved }: { inboxes: Inbox[]; on
             <h3 className="text-lg font-semibold">Chat Inboxes</h3>
           </div>
           <div className="flex items-center gap-2">
-            <button onClick={() => setEditing({ channel_type: 'web_widget', is_active: true, greeting_enabled: true, channel_config: { widget_color: '#B6FF00', position: 'bottom-right', pre_chat_form_enabled: true }})}
+            <button onClick={() => setEditing({ channel_type: 'website', is_active: true, greeting_enabled: true, channel_config: { widget_color: '#B6FF00', position: 'bottom-right', pre_chat_form_enabled: true }})}
               style={{ background: 'var(--color-mission-accent)', color: '#000' }}
               className="px-3 py-1.5 text-sm font-semibold rounded">+ New</button>
             <button onClick={onClose} className="text-neutral-500 hover:text-white">×</button>
@@ -841,15 +960,23 @@ function InboxManagerModal({ inboxes, onClose, onSaved }: { inboxes: Inbox[]; on
                       <span className="text-[10px] px-1.5 py-0.5 bg-neutral-800 rounded font-mono">{i.channel_type}</span>
                       {i.is_active ? <span className="text-[10px] text-green-400">● active</span> : <span className="text-[10px] text-neutral-500">● inactive</span>}
                     </div>
-                    <div className="text-[10px] text-neutral-500 font-mono truncate mt-0.5">token: {i.website_token}</div>
+                    <div className="text-[10px] text-neutral-500 font-mono truncate mt-0.5">
+                      {i.channel_type === 'website' || i.channel_type === 'web_widget'
+                        ? `token: ${i.website_token}`
+                        : i.external_id
+                          ? `id: ${i.external_id}`
+                          : '(chưa cấu hình)'}
+                    </div>
                   </div>
                   <div className="flex gap-1">
-                    <button onClick={() => copyEmbed(i.website_token)}
-                      className="text-xs px-2 py-1 border border-neutral-700 rounded hover:bg-neutral-800 flex items-center gap-1"
-                      title="Copy embed script">
-                      {copiedToken === i.website_token ? <Check className="w-3 h-3 text-green-400" /> : <Copy className="w-3 h-3" />}
-                      Embed
-                    </button>
+                    {(i.channel_type === 'website' || i.channel_type === 'web_widget') && (
+                      <button onClick={() => copyEmbed(i.website_token)}
+                        className="text-xs px-2 py-1 border border-neutral-700 rounded hover:bg-neutral-800 flex items-center gap-1"
+                        title="Copy embed script">
+                        {copiedToken === i.website_token ? <Check className="w-3 h-3 text-green-400" /> : <Copy className="w-3 h-3" />}
+                        Embed
+                      </button>
+                    )}
                     <button onClick={() => setEditing(i)}
                       className="text-xs px-2 py-1 border border-neutral-700 rounded hover:bg-neutral-800">Edit</button>
                     <button onClick={() => del(i.id, i.name)}
@@ -864,3 +991,212 @@ function InboxManagerModal({ inboxes, onClose, onSaved }: { inboxes: Inbox[]; on
     </div>
   )
 }
+
+// ══════════════════════════════════════════════════════════════════════════
+// PER-CHANNEL CONFIG PANELS
+// ══════════════════════════════════════════════════════════════════════════
+// These render inside the InboxManagerModal below the channel picker. Each
+// one reads/writes the same `editing.channel_config` blob — the shape of
+// which is documented on the DB migration (021_channels.sql).
+
+interface PanelProps {
+  editing: Partial<Inbox>
+  setEditing: React.Dispatch<React.SetStateAction<Partial<Inbox> | null>>
+}
+
+function TelegramConfigPanel({ editing, setEditing }: PanelProps) {
+  const cfg = (editing.channel_config as any) || {}
+  const [botToken, setBotToken] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [result, setResult] = useState<{ ok: boolean; msg: string } | null>(null)
+
+  const hasStoredToken = !!cfg.bot_token_encrypted
+  const savedInboxId = editing.id
+
+  const configureWebhook = async () => {
+    if (!savedInboxId) {
+      setResult({ ok: false, msg: 'Save inbox trước (tên + Save), sau đó quay lại để cấu hình webhook.' })
+      return
+    }
+    if (!botToken.trim()) {
+      setResult({ ok: false, msg: 'Paste bot token từ @BotFather.' })
+      return
+    }
+    setBusy(true); setResult(null)
+    try {
+      const r = await api<any>('/api/chat/telegram/set-webhook', {
+        method: 'POST',
+        body: JSON.stringify({ inbox_id: savedInboxId, bot_token: botToken.trim() }),
+      })
+      setResult({ ok: true, msg: `Webhook đã cấu hình cho @${r.bot_username}. URL: ${r.webhook_url}` })
+      setBotToken('')
+      // Refresh the editing state so the "already configured" chip shows up.
+      setEditing(prev => prev ? ({
+        ...prev,
+        external_id: r.bot_username,
+        channel_config: {
+          ...(prev.channel_config as any || {}),
+          bot_token_encrypted: '***stored***',
+          bot_username: r.bot_username,
+          webhook_url: r.webhook_url,
+          mode: 'webhook',
+        },
+      }) : prev)
+    } catch (e: any) {
+      setResult({ ok: false, msg: e.message || 'Lỗi không xác định' })
+    } finally { setBusy(false) }
+  }
+
+  return (
+    <div className="border border-sky-500/20 bg-sky-500/5 rounded-lg p-3 space-y-3">
+      <div className="text-xs text-sky-300 font-semibold flex items-center gap-2">
+        <SendIcon className="w-3.5 h-3.5" /> Cấu hình Telegram bot
+      </div>
+      <div className="text-[11px] text-neutral-400 space-y-1">
+        <div>1. Tạo bot mới với <a href="https://t.me/BotFather" target="_blank" rel="noreferrer" className="text-sky-400 hover:underline">@BotFather</a> → lấy bot token.</div>
+        <div>2. Paste token vào ô dưới rồi bấm "Cấu hình webhook tự động".</div>
+        <div>3. Telegram sẽ gửi mọi tin nhắn về CRM. Bạn reply trong Chat, tin nhắn tự động gửi ngược lại user.</div>
+      </div>
+
+      {hasStoredToken && (
+        <div className="flex items-center gap-2 text-[11px] text-green-400">
+          <CheckCircle2 className="w-3 h-3" />
+          Đã cấu hình{cfg.bot_username ? ` — @${cfg.bot_username}` : ''}. Paste token mới bên dưới nếu muốn đổi bot.
+        </div>
+      )}
+
+      <div>
+        <label className="text-[10px] text-neutral-500 uppercase tracking-wider block mb-1">Bot token</label>
+        <input
+          type="password"
+          value={botToken}
+          onChange={e => setBotToken(e.target.value)}
+          placeholder="123456789:ABCdefGHIjklMNOpqrsTUVwxyz"
+          className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 rounded text-sm font-mono"
+        />
+      </div>
+
+      <button
+        onClick={configureWebhook}
+        disabled={busy || !botToken.trim() || !savedInboxId}
+        className="w-full px-3 py-2 rounded text-sm font-semibold disabled:opacity-40"
+        style={{ background: 'var(--color-mission-accent)', color: '#000' }}
+      >
+        {busy ? <Loader2 className="w-4 h-4 animate-spin inline" /> : 'Cấu hình webhook tự động'}
+      </button>
+      {!savedInboxId && (
+        <div className="text-[10px] text-amber-400">Cần Save inbox (tên + Save) trước khi cấu hình webhook.</div>
+      )}
+      {result && (
+        <div className={`text-[11px] px-2.5 py-2 rounded border ${result.ok ? 'border-green-500/40 bg-green-500/10 text-green-300' : 'border-red-500/40 bg-red-500/10 text-red-300'}`}>
+          {result.msg}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ZaloConfigPanel({ editing, setEditing }: PanelProps) {
+  const cfg = (editing.channel_config as any) || {}
+  const patchCfg = (patch: Record<string, unknown>) =>
+    setEditing(prev => prev ? ({ ...prev, channel_config: { ...(prev.channel_config as any || {}), ...patch }}) : prev)
+
+  return (
+    <div className="border border-blue-500/20 bg-blue-500/5 rounded-lg p-3 space-y-3">
+      <div className="text-xs text-blue-300 font-semibold flex items-center gap-2">
+        <MessageSquare className="w-3.5 h-3.5" /> Cấu hình Zalo
+      </div>
+      <div className="text-[11px] text-neutral-400 space-y-1">
+        <div>Zalo dùng thư viện <code>zca-js</code> (không chính thức) — cần chạy worker song song.</div>
+        <div>MVP: paste session JSON đã export sẵn. QR flow trong worker sẽ có ở version sau.</div>
+      </div>
+      <div className="flex items-start gap-2 px-2.5 py-2 rounded border border-amber-500/30 bg-amber-500/5 text-[11px] text-amber-200/90">
+        <AlertTriangle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
+        <div>
+          Token/cookie sẽ được lưu <strong>plaintext trong form này</strong> và mã hoá server-side lúc lưu.
+          Không lưu trên máy tính chung. Cân nhắc dùng tài khoản Zalo phụ.
+        </div>
+      </div>
+
+      <div>
+        <label className="text-[10px] text-neutral-500 uppercase tracking-wider block mb-1">Zalo cookie (JSON array từ zca-js)</label>
+        <textarea
+          value={cfg.cookie_plain || ''}
+          onChange={e => patchCfg({ cookie_plain: e.target.value })}
+          rows={4}
+          placeholder='[{"key":"...","value":"...","domain":".zalo.me",...}]'
+          className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 rounded text-xs font-mono"
+        />
+        <div className="text-[10px] text-neutral-500 mt-1">
+          Sẽ được encrypt sang <code>cookie_encrypted</code> khi Save (chưa implement — TODO worker QR flow).
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <div>
+          <label className="text-[10px] text-neutral-500 uppercase tracking-wider block mb-1">IMEI</label>
+          <input value={cfg.imei || ''} onChange={e => patchCfg({ imei: e.target.value })}
+            className="w-full px-2 py-1.5 bg-neutral-950 border border-neutral-800 rounded text-xs font-mono" />
+        </div>
+        <div>
+          <label className="text-[10px] text-neutral-500 uppercase tracking-wider block mb-1">User agent</label>
+          <input value={cfg.user_agent || ''} onChange={e => patchCfg({ user_agent: e.target.value })}
+            className="w-full px-2 py-1.5 bg-neutral-950 border border-neutral-800 rounded text-xs font-mono" />
+        </div>
+      </div>
+      <div className="text-[11px] text-neutral-500">
+        Sau khi save inbox, chạy worker (<code>cd worker && npm run dev</code>). Worker sẽ auto-detect và kết nối.
+      </div>
+    </div>
+  )
+}
+
+function FacebookConfigPanel({ editing, setEditing }: PanelProps) {
+  const cfg = (editing.channel_config as any) || {}
+  const patchCfg = (patch: Record<string, unknown>) =>
+    setEditing(prev => prev ? ({ ...prev, channel_config: { ...(prev.channel_config as any || {}), ...patch }}) : prev)
+
+  return (
+    <div className="border border-blue-600/20 bg-blue-600/5 rounded-lg p-3 space-y-2">
+      <div className="text-xs text-blue-400 font-semibold flex items-center gap-2">
+        <Facebook className="w-3.5 h-3.5" /> Facebook Messenger — <em className="text-neutral-500">stub</em>
+      </div>
+      <div className="text-[11px] text-neutral-400">
+        Chưa implement. Xem <code>worker/src/channels/facebook.ts</code> TODO. Fields dưới đây lưu vào <code>channel_config</code> để không mất công nhập lại khi feature bật.
+      </div>
+      <input placeholder="Page ID" value={cfg.page_id || ''} onChange={e => patchCfg({ page_id: e.target.value })}
+        className="w-full px-2 py-1.5 bg-neutral-950 border border-neutral-800 rounded text-xs" />
+      <input placeholder="Page access token" value={cfg.page_access_token_plain || ''} onChange={e => patchCfg({ page_access_token_plain: e.target.value })}
+        className="w-full px-2 py-1.5 bg-neutral-950 border border-neutral-800 rounded text-xs" />
+    </div>
+  )
+}
+
+function EmailConfigPanel({ editing, setEditing }: PanelProps) {
+  const cfg = (editing.channel_config as any) || {}
+  const patchCfg = (patch: Record<string, unknown>) =>
+    setEditing(prev => prev ? ({ ...prev, channel_config: { ...(prev.channel_config as any || {}), ...patch }}) : prev)
+
+  return (
+    <div className="border border-amber-500/20 bg-amber-500/5 rounded-lg p-3 space-y-2">
+      <div className="text-xs text-amber-300 font-semibold flex items-center gap-2">
+        <AtSign className="w-3.5 h-3.5" /> Email (IMAP + SMTP) — <em className="text-neutral-500">stub</em>
+      </div>
+      <div className="text-[11px] text-neutral-400">
+        Chưa implement. Xem <code>worker/src/channels/email.ts</code> TODO.
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <input placeholder="IMAP host" value={cfg.imap_host || ''} onChange={e => patchCfg({ imap_host: e.target.value })}
+          className="px-2 py-1.5 bg-neutral-950 border border-neutral-800 rounded text-xs" />
+        <input placeholder="IMAP port" value={cfg.imap_port || ''} onChange={e => patchCfg({ imap_port: e.target.value })}
+          className="px-2 py-1.5 bg-neutral-950 border border-neutral-800 rounded text-xs" />
+        <input placeholder="IMAP user" value={cfg.imap_user || ''} onChange={e => patchCfg({ imap_user: e.target.value })}
+          className="px-2 py-1.5 bg-neutral-950 border border-neutral-800 rounded text-xs" />
+        <input placeholder="IMAP password" type="password" value={cfg.imap_pass_plain || ''} onChange={e => patchCfg({ imap_pass_plain: e.target.value })}
+          className="px-2 py-1.5 bg-neutral-950 border border-neutral-800 rounded text-xs" />
+      </div>
+      <input placeholder="From address (SMTP)" value={cfg.from_address || ''} onChange={e => patchCfg({ from_address: e.target.value })}
+        className="w-full px-2 py-1.5 bg-neutral-950 border border-neutral-800 rounded text-xs" />
+    </div>
+  )
+}
+

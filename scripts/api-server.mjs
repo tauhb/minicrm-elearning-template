@@ -1849,6 +1849,8 @@ const server = http.createServer(async (req, nodeRes) => {
       await handleViaImport(mockReq, res, req.url)
     } else if (req.url?.startsWith('/api/ai-providers')) {
       await handleViaImport(mockReq, res, req.url)
+    } else if (req.url?.startsWith('/api/knowledge')) {
+      await handleViaImport(mockReq, res, req.url)
     } else if (req.url?.startsWith('/api/customers')) {
       await handleViaImport(mockReq, res, req.url)
     } else if (req.url?.startsWith('/api/team')) {
@@ -1872,6 +1874,10 @@ const server = http.createServer(async (req, nodeRes) => {
       await handleViaImport(mockReq, res, req.url)
     } else if (req.url === '/api/email/broadcast') {
       await handleEmailBroadcast(mockReq, res)
+    } else if (req.url?.startsWith('/api/api-tokens/verify')) {
+      await handleViaImport(mockReq, res, req.url)
+    } else if (req.url?.startsWith('/api/api-tokens')) {
+      await handleViaImport(mockReq, res, req.url)
     } else if (req.url === '/api/health/env-check' || req.url?.startsWith('/api/health/env-check?')) {
       await handleHealthEnvCheck(mockReq, res)
     } else if (req.url === '/api/health' || req.url?.startsWith('/api/health?')) {

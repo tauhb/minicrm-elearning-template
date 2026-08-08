@@ -51,12 +51,23 @@ Ví dụ:
 
 Vite + React 19 + Supabase + Tailwind + Resend
 
+## 💬 Chat Channels (Sprint C)
+
+Portal Chat inbox hỗ trợ **Website + Telegram + Zalo + Facebook + Email** trong cùng một view — leads/customers tự động resolve, reply gửi ngược lại đúng kênh.
+
+- **Website + Telegram** chạy trên Vercel (webhook mode). Không cần server phụ.
+- **Zalo + Email** cần worker riêng (Docker / Railway / VPS) — xem [`worker/README.md`](./worker/README.md). Optional, chỉ deploy khi cần.
+
+Chi tiết setup từng kênh: [docs/CHANNELS.md](./docs/CHANNELS.md).
+
 ## 📖 Docs
 
 - [AGENT.md](./AGENT.md) — Instructions cho AI agent (deploy flow, rebrand flow, kiến trúc)
 - [WHAT_YOU_GET.md](./WHAT_YOU_GET.md) — Feature list chi tiết
 - [CUSTOMIZE.md](./CUSTOMIZE.md) — Ngôn ngữ tự nhiên → agent action
 - [SETUP_GUIDE.md](./SETUP_GUIDE.md) — Manual setup (nếu không dùng agent)
+- [docs/CHANNELS.md](./docs/CHANNELS.md) — Cấu hình Telegram/Zalo/FB/Email cho Chat inbox
+- [worker/README.md](./worker/README.md) — Deploy worker cho Zalo + Email
 - [`.claude/commands/`](./.claude/commands/) — 6 slash commands có sẵn
 
 ## 🆓 License

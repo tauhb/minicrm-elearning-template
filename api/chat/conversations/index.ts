@@ -9,6 +9,38 @@
 
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { createClient } from '@supabase/supabase-js'
+import { tryDecrypt } from '../../../services/crypto'
+
+// Send a Telegram message inline (no worker needed). We fetch the bot token
+// from inbox.channel_config every reply — 1 extra select per reply, but that
+// keeps everyone else's happy-path unchanged and avoids caching decrypted
+// secrets in this hot API process.
+async function deliverTelegram(
+  admin: any,
+  inboxId: string,
+  chatId: string,
+  content: string,
+): Promise<{ ok: boolean; error?: string; message_id?: number }> {
+  try {
+    const { data: inbox } = await admin
+      .from('chat_inboxes').select('channel_config').eq('id', inboxId).maybeSingle()
+    const cfg = (inbox && (inbox as any).channel_config) || {}
+    const enc = cfg.bot_token_encrypted
+    if (!enc) return { ok: false, error: 'inbox missing bot_token_encrypted — reconfigure webhook' }
+    const botToken = tryDecrypt(enc)
+    if (!botToken) return { ok: false, error: 'decrypt failed — check PROVIDER_ENCRYPTION_KEY' }
+    const r = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: chatId, text: content, disable_web_page_preview: true }),
+    })
+    const j = await r.json() as any
+    if (!j.ok) return { ok: false, error: `Telegram: ${j.description}` }
+    return { ok: true, message_id: j.result?.message_id }
+  } catch (e: any) {
+    return { ok: false, error: e.message }
+  }
+}
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -131,15 +163,75 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (action === 'reply' || action === 'note') {
       const content = String(body.content || '').trim()
       if (!content) return res.status(400).json({ error: 'content required' })
+
+      // Load conversation to find channel + thread — needed for external delivery.
+      const { data: conv } = await admin
+        .from('chat_conversations')
+        .select('inbox_id, channel_type, external_thread_id')
+        .eq('id', id)
+        .maybeSingle()
+
+      // Internal notes never leave the CRM regardless of channel.
+      const isNote = action === 'note'
+      const isExternal = !isNote && conv?.external_thread_id
+        && ['telegram', 'zalo', 'facebook', 'email'].includes(conv.channel_type || '')
+
+      // Initial delivery_status:
+      //   • note or website → 'sent' immediately (nothing to deliver externally)
+      //   • telegram → 'pending' → flipped to 'sent' inline below
+      //   • zalo/facebook/email → 'pending' → worker flips after delivery
+      const initialStatus = isExternal ? 'pending' : 'sent'
+
       const { data: msg, error } = await admin.from('chat_messages').insert({
         conversation_id: id,
         content,
         content_type: 'text',
         sender_type: 'agent',
         sender_id: user.id,
-        private: action === 'note',
+        private: isNote,
+        delivery_status: initialStatus,
       }).select('*').single()
       if (error) return res.status(500).json({ error: error.message })
+
+      // ── External channel delivery ────────────────────────────────────────
+      if (isExternal && conv) {
+        if (conv.channel_type === 'telegram') {
+          // Inline: no worker needed — Telegram is a plain HTTP call.
+          const result = await deliverTelegram(admin, conv.inbox_id, conv.external_thread_id!, content)
+          await admin.from('chat_messages').update({
+            delivery_status: result.ok ? 'sent' : 'failed',
+            external_message_id: result.message_id
+              ? `tg:${conv.external_thread_id}:${result.message_id}` : null,
+          }).eq('id', msg.id)
+          if (!result.ok) {
+            // Also record on the queue for worker retry visibility, so admins
+            // can see failed deliveries in one place.
+            await admin.from('chat_outbound_queue').insert({
+              message_id: msg.id,
+              inbox_id: conv.inbox_id,
+              conversation_id: id,
+              channel_type: 'telegram',
+              external_thread_id: conv.external_thread_id!,
+              content,
+              status: 'failed',
+              attempts: 1,
+              last_error: result.error,
+            })
+          }
+        } else {
+          // Zalo / Facebook / Email — queue for worker.
+          await admin.from('chat_outbound_queue').insert({
+            message_id: msg.id,
+            inbox_id: conv.inbox_id,
+            conversation_id: id,
+            channel_type: conv.channel_type!,
+            external_thread_id: conv.external_thread_id!,
+            content,
+            status: 'pending',
+          })
+        }
+      }
+
       return res.json(msg)
     }
 

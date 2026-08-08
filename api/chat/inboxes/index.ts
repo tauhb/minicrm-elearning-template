@@ -48,7 +48,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return res.json(data)
       }
       const { data } = await admin.from('chat_inboxes')
-        .select('id, name, channel_type, channel_config, website_token, is_active, greeting_enabled, greeting_message, auto_assign_to, created_at, updated_at')
+        .select('id, name, channel_type, channel_config, external_id, website_token, is_active, greeting_enabled, greeting_message, auto_assign_to, created_at, updated_at')
         .order('created_at', { ascending: false })
       return res.json({ inboxes: data || [] })
     }
@@ -63,10 +63,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (req.method === 'POST') {
       const body = req.body || {}
       if (!body.name) return res.status(400).json({ error: 'name required' })
+      // Sanitize channel_config: never persist the placeholder "***stored***"
+      // sentinel returned by the client after a webhook-configure round-trip.
+      // If the client is editing an existing inbox with a stored token, keep
+      // the existing encrypted value.
+      let incomingConfig = body.channel_config || {}
+      if (body.id && incomingConfig?.bot_token_encrypted === '***stored***') {
+        const { data: existing } = await admin.from('chat_inboxes')
+          .select('channel_config').eq('id', body.id).maybeSingle()
+        const existingCfg = (existing?.channel_config as any) || {}
+        incomingConfig = { ...incomingConfig, bot_token_encrypted: existingCfg.bot_token_encrypted }
+      }
+
       const payload: any = {
         name: body.name,
-        channel_type: body.channel_type || 'web_widget',
-        channel_config: body.channel_config || {},
+        channel_type: body.channel_type || 'website',
+        channel_config: incomingConfig,
+        external_id: body.external_id ?? null,
         greeting_enabled: body.greeting_enabled !== false,
         greeting_message: body.greeting_message || 'Xin chào! Chúng tôi có thể giúp gì?',
         working_hours_enabled: !!body.working_hours_enabled,

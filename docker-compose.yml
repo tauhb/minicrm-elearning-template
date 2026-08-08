@@ -1,0 +1,30 @@
+# Optional local bundle. The portal runs on Vercel in prod; use this only if
+# you want to test the worker + portal together against a local Supabase.
+#
+# Prereqs:
+#   • supabase CLI running: `supabase start` from the app root.
+#   • .env.local in this directory with all VITE_* + service role keys.
+#   • worker/.env with matching PROVIDER_ENCRYPTION_KEY.
+
+services:
+  portal:
+    image: node:20-alpine
+    working_dir: /app
+    command: sh -c "npm install && npm run dev"
+    env_file: .env.local
+    ports:
+      - "5173:5173"   # Vite dev server
+      - "3001:3001"   # API server
+    volumes:
+      - .:/app
+      - portal_node_modules:/app/node_modules
+
+  worker:
+    build: ./worker
+    env_file: worker/.env
+    restart: unless-stopped
+    depends_on:
+      - portal   # not a hard dep; the worker only needs Supabase
+
+volumes:
+  portal_node_modules:
