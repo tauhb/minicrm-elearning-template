@@ -1691,17 +1691,32 @@ async function handleHealthEnvCheck(req, res) {
   } else { aiHint = undefined }
   push('ai_provider', 'AI Provider (OpenAI key hoặc OAuth)', 'ai', aiOk, aiHint)
 
-  // Email
-  const emailProvider = process.env.EMAIL_PROVIDER
-  const brevoKey = !!process.env.BREVO_API_KEY
-  const resendKey = !!process.env.RESEND_API_KEY
+  // Email — new source of truth: email_connections table (Track β).
   let emailPresent = false, emailHint
-  if (!emailProvider) {
-    if (resendKey) { emailPresent = true; emailHint = 'EMAIL_PROVIDER chưa set. Dùng Resend cho transactional; set EMAIL_PROVIDER=brevo để có sequences.' }
-    else { emailHint = 'Set EMAIL_PROVIDER=brevo + BREVO_API_KEY trong .env, hoặc RESEND_API_KEY cho email giao dịch.' }
-  } else if (emailProvider === 'brevo') { emailPresent = brevoKey; emailHint = brevoKey ? undefined : 'EMAIL_PROVIDER=brevo nhưng thiếu BREVO_API_KEY.' }
-  else if (emailProvider === 'resend') { emailPresent = resendKey; emailHint = resendKey ? undefined : 'EMAIL_PROVIDER=resend nhưng thiếu RESEND_API_KEY.' }
-  push('email_provider', `Email (${emailProvider || 'chưa set'})`, 'email', emailPresent, emailHint)
+  let emailLabel = 'Email connections'
+  try {
+    const { data: conns } = await admin.from('email_connections')
+      .select('provider, name, is_default_marketing').eq('status', 'active')
+    const active = conns || []
+    if (active.length > 0) {
+      emailPresent = true
+      const providers = [...new Set(active.map(c => c.provider))].join(', ')
+      emailLabel = `Email (${active.length} kết nối · ${providers})`
+      const hasMktgDefault = active.some(c => c.is_default_marketing)
+      if (!hasMktgDefault) emailHint = 'Chưa đặt default marketing (bấm ⭐ trong Settings → Email → Kết nối).'
+    }
+  } catch {}
+  if (!emailPresent) {
+    const brevoKey = !!process.env.BREVO_API_KEY
+    const resendKey = !!process.env.RESEND_API_KEY
+    if (brevoKey || resendKey) {
+      emailPresent = true
+      emailHint = 'Có API key trong .env nhưng chưa tạo email_connections. Vào Cài đặt → Email.'
+    } else {
+      emailHint = 'Chưa có kết nối email. Vào Cài đặt → Email → Kết nối.'
+    }
+  }
+  push('email_connections', emailLabel, 'email', emailPresent, emailHint)
 
   // Payment
   let payFunnels = 0

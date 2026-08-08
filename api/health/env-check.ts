@@ -146,34 +146,49 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   })
 
   // ── Email ────────────────────────────────────────────────
-  const emailProvider = (process.env.EMAIL_PROVIDER || '').toLowerCase().trim()
-  const brevoKey = !!process.env.BREVO_API_KEY
-  const resendKey = !!process.env.RESEND_API_KEY
+  // The new source of truth is email_connections (Track β). Fall back to env vars +
+  // legacy app_settings only when the table is empty (fresh install pre-migration).
   let emailPresent = false
   let emailHint: string | undefined
-  const emailMeta: any = { EMAIL_PROVIDER: emailProvider || null, brevo_key: brevoKey, resend_key: resendKey }
-  if (!emailProvider) {
-    // Fallback: resend key alone is acceptable for transactional email
-    if (resendKey) {
-      emailPresent = true
-      emailHint = 'Đang dùng Resend (transactional). Để chạy nurture sequences, set EMAIL_PROVIDER=brevo và BREVO_API_KEY.'
-    } else {
-      emailPresent = false
-      emailHint = 'Set EMAIL_PROVIDER=brevo (khuyên dùng) + BREVO_API_KEY trong .env. Hoặc RESEND_API_KEY cho email giao dịch.'
+  const emailMeta: any = { connections: 0, has_transactional_default: false, has_marketing_default: false }
+  try {
+    if (serviceKey && supabaseUrl) {
+      const admin = createClient(supabaseUrl, serviceKey, { auth: { autoRefreshToken: false, persistSession: false } })
+      const { data: conns } = await admin.from('email_connections')
+        .select('provider, name, status, is_default_transactional, is_default_marketing')
+        .eq('status', 'active')
+      const active = conns || []
+      emailMeta.connections = active.length
+      emailMeta.providers = [...new Set(active.map((c: any) => c.provider))]
+      emailMeta.has_transactional_default = active.some((c: any) => c.is_default_transactional)
+      emailMeta.has_marketing_default     = active.some((c: any) => c.is_default_marketing)
+      if (active.length > 0) {
+        emailPresent = true
+        const labels = active.map((c: any) => c.name).join(', ')
+        emailHint = `${active.length} kết nối đang hoạt động: ${labels}`
+        // Warn if no defaults set (broadcast will resolve to any active — still works but ambiguous)
+        if (!emailMeta.has_marketing_default) {
+          emailHint += ' — chưa đặt default marketing (bấm ⭐ trong Settings → Email → Kết nối).'
+        }
+      }
     }
-  } else if (emailProvider === 'brevo') {
-    emailPresent = brevoKey
-    emailHint = brevoKey ? undefined : 'EMAIL_PROVIDER=brevo nhưng thiếu BREVO_API_KEY.'
-  } else if (emailProvider === 'resend') {
-    emailPresent = resendKey
-    emailHint = resendKey ? undefined : 'EMAIL_PROVIDER=resend nhưng thiếu RESEND_API_KEY.'
-  } else {
-    emailPresent = false
-    emailHint = `EMAIL_PROVIDER=${emailProvider} chưa hỗ trợ. Dùng 'brevo' hoặc 'resend'.`
+  } catch (e: any) {
+    emailMeta.error = e.message
+  }
+  // Fallback: env or legacy app_settings key present but no connections yet
+  if (!emailPresent) {
+    const brevoKey  = !!process.env.BREVO_API_KEY
+    const resendKey = !!process.env.RESEND_API_KEY
+    if (brevoKey || resendKey) {
+      emailPresent = true
+      emailHint = 'Có API key trong .env nhưng chưa tạo email_connections. Vào Cài đặt → Email → Kết nối để thêm.'
+    } else {
+      emailHint = 'Chưa có kết nối email nào. Vào Cài đặt → Email → Kết nối để thêm Brevo/Resend.'
+    }
   }
   items.push({
-    key: 'EMAIL_PROVIDER',
-    label: 'Email provider',
+    key: 'email_connections',
+    label: 'Email connections',
     category: 'email',
     present: emailPresent,
     hint: emailHint,
