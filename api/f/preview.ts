@@ -35,7 +35,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(401).send(notFoundHtml('Token không hợp lệ'))
   }
   const { data: caller } = await userClient.from('customers').select('role').eq('id', user.id).maybeSingle()
-  if (caller?.role !== 'admin') {
+  if (!['owner','admin'].includes(caller?.role || '')) {
     res.setHeader('Content-Type', 'text/html; charset=utf-8')
     return res.status(403).send(notFoundHtml('Admin only'))
   }

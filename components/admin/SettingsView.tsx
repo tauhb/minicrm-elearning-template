@@ -98,6 +98,35 @@ const SettingsView: React.FC = () => {
   const [resendKeySaving, setResendKeySaving] = useState(false)
   const [smtpCopied, setSmtpCopied] = useState<string | null>(null)
 
+  // Email sub-tab (Settings > Email)
+  const [emailSubTab, setEmailSubTab] = useState<'settings' | 'marketing'>('settings')
+
+  // Brevo (marketing provider) state
+  const [brevoKey, setBrevoKey] = useState('')
+  const [brevoKeySaving, setBrevoKeySaving] = useState(false)
+  const [brevoKeySaved, setBrevoKeySaved] = useState(false)
+  const [emailProvider, setEmailProviderState] = useState<'brevo' | 'resend' | ''>('')
+
+  useEffect(() => {
+    supabase.from('app_settings').select('key, value').in('key', ['brevo_api_key', 'email_provider']).then(({ data }) => {
+      const m: Record<string, any> = {}
+      ;(data || []).forEach((r: any) => { m[r.key] = r.value?.value ?? r.value })
+      if (m['brevo_api_key']) setBrevoKey(m['brevo_api_key'])
+      if (m['email_provider']) setEmailProviderState(m['email_provider'])
+    })
+  }, [])
+
+  const saveBrevo = async () => {
+    setBrevoKeySaving(true)
+    await supabase.from('app_settings').upsert([
+      { key: 'brevo_api_key', value: { value: brevoKey.trim() } },
+      { key: 'email_provider', value: { value: brevoKey.trim() ? 'brevo' : (emailProvider || 'resend') } },
+    ])
+    if (brevoKey.trim()) setEmailProviderState('brevo')
+    setBrevoKeySaving(false); setBrevoKeySaved(true)
+    setTimeout(() => setBrevoKeySaved(false), 2000)
+  }
+
   // General state
   const [appTitle, setAppTitle] = useState('')
   const [appLogoUrl, setAppLogoUrl] = useState('')
@@ -707,7 +736,112 @@ async function provisionAfterPayment(payment) {
 
       {activeTab === 'email' && (
         <div className="space-y-6">
+          {/* Sub-tabs */}
+          <div className="flex gap-1 border-b border-gray-800">
+            {([
+              { key: 'settings',  label: 'Cấu hình Email',  icon: Mail },
+              { key: 'marketing', label: 'Email Marketing', icon: Sparkles },
+            ] as const).map(t => {
+              const active = emailSubTab === t.key
+              return (
+                <button
+                  key={t.key}
+                  onClick={() => setEmailSubTab(t.key)}
+                  className="flex items-center gap-2 px-4 py-2 text-sm border-b-2 -mb-px transition-all"
+                  style={active
+                    ? { borderColor: 'var(--color-mission-accent)', color: 'var(--color-mission-accent)' }
+                    : { borderColor: 'transparent', color: '#9ca3af' }}
+                >
+                  <t.icon size={14} /> {t.label}
+                </button>
+              )
+            })}
+          </div>
 
+          {emailSubTab === 'marketing' && (
+            <>
+              {/* Brevo connection */}
+              <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
+                <div className="flex items-center justify-between mb-1">
+                  <div className="flex items-center gap-2">
+                    <Sparkles size={16} style={{ color: 'var(--color-mission-accent)' }} />
+                    <h2 className="text-sm font-semibold text-white">Brevo (Sendinblue) — Email Marketing</h2>
+                    {emailProvider === 'brevo' && brevoKey && (
+                      <span className="text-[10px] px-2 py-0.5 rounded bg-green-500/10 text-green-400 border border-green-500/30">Đang dùng</span>
+                    )}
+                  </div>
+                  <a href="https://www.brevo.com/" target="_blank" rel="noopener noreferrer"
+                     className="flex items-center gap-1 text-xs text-gray-500 hover:text-white">
+                    Tạo tài khoản (300 email/day free) <ExternalLink size={11} />
+                  </a>
+                </div>
+                <p className="text-xs text-gray-500 mb-4">
+                  Kết nối Brevo để mở khóa broadcast + sequence tự động (welcome series, abandoned cart, re-engagement).
+                  Sau khi lưu API key, mọi email marketing sẽ đi qua Brevo. Email hệ thống (magic link, reset password) vẫn dùng Resend/Supabase.
+                </p>
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1.5">Brevo API Key (v3)</label>
+                    <input
+                      type="password"
+                      value={brevoKey}
+                      onChange={e => setBrevoKey(e.target.value)}
+                      placeholder="xkeysib-..."
+                      className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white font-mono placeholder-gray-600 focus:outline-none focus:border-gray-500"
+                    />
+                    <p className="text-[10px] text-gray-500 mt-1">
+                      Lấy key: Brevo Dashboard → SMTP &amp; API → API Keys → Create a new API key
+                    </p>
+                  </div>
+                  <button
+                    onClick={saveBrevo}
+                    disabled={brevoKeySaving}
+                    className="flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-lg disabled:opacity-50 hover:opacity-90"
+                    style={{ backgroundColor: 'var(--color-mission-accent)', color: '#000' }}
+                  >
+                    {brevoKeySaved ? <Check size={13} /> : null}
+                    {brevoKeySaving ? 'Đang lưu...' : brevoKeySaved ? 'Đã lưu!' : 'Lưu API Key'}
+                  </button>
+                </div>
+              </div>
+
+              {/* Quick actions */}
+              <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
+                <h2 className="text-sm font-semibold text-white mb-3">Hành động nhanh</h2>
+                <div className="space-y-2">
+                  <a href="/admin/email" className="flex items-center gap-3 p-3 rounded-lg border border-gray-800 hover:bg-gray-800 transition">
+                    <Mail size={16} className="text-gray-400" />
+                    <div className="flex-1">
+                      <p className="text-sm text-white">Broadcast + Campaign History</p>
+                      <p className="text-[11px] text-gray-500">Gửi email cho segment leads/customers/tag, xem lịch sử gửi</p>
+                    </div>
+                    <ExternalLink size={13} className="text-gray-500" />
+                  </a>
+                  <a href="https://app.brevo.com/" target="_blank" rel="noopener noreferrer"
+                     className="flex items-center gap-3 p-3 rounded-lg border border-gray-800 hover:bg-gray-800 transition">
+                    <Sparkles size={16} className="text-gray-400" />
+                    <div className="flex-1">
+                      <p className="text-sm text-white">Mở Brevo Cloud Dashboard</p>
+                      <p className="text-[11px] text-gray-500">Campaign builder, template designer, segment builder, open/click tracking</p>
+                    </div>
+                    <ExternalLink size={13} className="text-gray-500" />
+                  </a>
+                </div>
+              </div>
+
+              {/* Provider info */}
+              <div className="text-[11px] text-gray-500 flex items-start gap-2 px-2">
+                <Info size={12} className="mt-0.5 flex-shrink-0" />
+                <div>
+                  Provider hiện tại: <strong className="text-gray-300">{emailProvider || '(chưa cấu hình)'}</strong>.
+                  Có thể chuyển sang các provider khác (Mailgun, SES, Postmark) bằng cách set <code className="text-gray-400">EMAIL_PROVIDER</code> trong .env — hiện chỉ tự động cấu hình Brevo + Resend.
+                </div>
+              </div>
+            </>
+          )}
+
+          {emailSubTab === 'settings' && (
+          <>
           {/* Resend API Key */}
           <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
             <div className="flex items-center justify-between mb-1">
@@ -795,7 +929,8 @@ async function provisionAfterPayment(payment) {
               </div>
             ))}
           </div>
-
+          </>
+          )}
         </div>
       )}
 

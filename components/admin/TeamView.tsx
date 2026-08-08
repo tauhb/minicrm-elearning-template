@@ -305,6 +305,15 @@ const TeamRow: React.FC<{
 }> = ({ member, isCurrentUser, ownerCount, busyLabel, onChangeRole, onDeactivate, onActivate, onResend }) => {
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
+  const btnRef  = useRef<HTMLButtonElement>(null)
+  // Compute fixed position so the dropdown escapes any parent overflow:auto container
+  // (like the new Settings sidebar layout).
+  const [menuPos, setMenuPos] = useState<{ top: number; right: number } | null>(null)
+  const openMenu = () => {
+    const r = btnRef.current?.getBoundingClientRect()
+    if (r) setMenuPos({ top: r.bottom + 4, right: window.innerWidth - r.right })
+    setMenuOpen(o => !o)
+  }
   const isActive = (member.status || 'active') === 'active'
   const roleColor = ROLE_COLORS[member.role]
   const isLastOwner = member.role === 'owner' && ownerCount <= 1
@@ -362,14 +371,18 @@ const TeamRow: React.FC<{
       <td className="px-5 py-4 text-right relative">
         <div ref={menuRef} className="relative inline-block">
           <button
-            onClick={() => setMenuOpen(o => !o)}
+            ref={btnRef}
+            onClick={openMenu}
             disabled={!!busyLabel}
             className="p-1.5 rounded-lg text-gray-500 hover:text-white hover:bg-gray-800 transition-colors disabled:opacity-40"
           >
             {busyLabel ? <Loader2 size={14} className="animate-spin" /> : <MoreHorizontal size={16} />}
           </button>
-          {menuOpen && (
-            <div className="absolute right-0 top-full mt-1 z-20 w-52 bg-gray-900 border border-gray-800 rounded-lg shadow-xl overflow-hidden">
+          {menuOpen && menuPos && (
+            <div
+              className="fixed z-50 w-52 bg-gray-900 border border-gray-800 rounded-lg shadow-xl overflow-hidden"
+              style={{ top: menuPos.top, right: menuPos.right }}
+            >
               <MenuItem
                 icon={<Shield size={13} />}
                 label="Đổi vai trò"

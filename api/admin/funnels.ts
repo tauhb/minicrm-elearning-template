@@ -23,7 +23,7 @@ async function requireAdmin(req: VercelRequest, supabase: ReturnType<typeof getA
   const { data: { user } } = await anonClient.auth.getUser()
   if (!user) return null
   const { data: customer } = await supabase.from('customers').select('role').eq('id', user.id).maybeSingle()
-  return customer?.role === 'admin' ? user.id : null
+  return ['owner','admin'].includes(customer?.role || '') ? user.id : null
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {

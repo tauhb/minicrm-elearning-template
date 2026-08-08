@@ -27,7 +27,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const { data: { user } } = await userClient.auth.getUser()
   if (!user) return res.status(401).json({ error: 'Invalid token' })
   const { data: caller } = await userClient.from('customers').select('role').eq('id', user.id).maybeSingle()
-  if (caller?.role !== 'admin') return res.status(403).json({ error: 'Admin only' })
+  if (!['owner','admin'].includes(caller?.role || '')) return res.status(403).json({ error: 'Admin only' })
 
   const admin = createClient(
     process.env.VITE_SUPABASE_URL!,

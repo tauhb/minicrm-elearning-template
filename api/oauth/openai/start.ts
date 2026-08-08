@@ -33,7 +33,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const { data: caller } = await userClient
     .from('customers').select('role').eq('id', user.id).maybeSingle()
-  if (!caller || caller.role !== 'admin') {
+  if (!caller || !['owner','admin'].includes(caller.role)) {
     return res.status(403).json({ error: 'Admin only' })
   }
 
