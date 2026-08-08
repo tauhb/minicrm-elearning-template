@@ -10,8 +10,9 @@ import CopyFormulasView from './CopyFormulasView'
 import HealthCheckTab from './HealthCheckTab'
 import TeamView from './TeamView'
 import ChatSnippetsView from './ChatSnippetsView'
+import APITokensView from './APITokensView'
 
-type Tab = 'team' | 'chat-snippets' | 'webhook' | 'email' | 'ai' | 'funnel-types' | 'copy-formulas' | 'health' | 'general'
+type Tab = 'team' | 'chat-snippets' | 'webhook' | 'email' | 'ai' | 'funnel-types' | 'copy-formulas' | 'health' | 'api-tokens' | 'general'
 
 const THEMES: Array<{
   id: PortalTheme; name: string
@@ -56,7 +57,7 @@ const THEMES: Array<{
   },
 ]
 
-const VALID_TABS: Tab[] = ['team', 'chat-snippets', 'webhook', 'email', 'ai', 'funnel-types', 'copy-formulas', 'health', 'general']
+const VALID_TABS: Tab[] = ['team', 'chat-snippets', 'webhook', 'email', 'ai', 'funnel-types', 'copy-formulas', 'health', 'api-tokens', 'general']
 
 const readTabFromHash = (): Tab | null => {
   if (typeof window === 'undefined') return null
@@ -249,6 +250,7 @@ const SettingsView: React.FC = () => {
           { key: 'funnel-types', label: 'Funnel Types', icon: Layers },
           { key: 'copy-formulas', label: 'Copy Formulas', icon: PenLine },
           { key: 'health', label: 'Health check', icon: Activity },
+          { key: 'api-tokens', label: 'API Tokens', icon: KeyRound },
           { key: 'general', label: 'Chung', icon: Sliders },
         ] as { key: Tab; label: string; icon: React.FC<any> }[]).map(tab => (
           <button
@@ -779,6 +781,7 @@ async function provisionAfterPayment(payment) {
       {activeTab === 'funnel-types' && <FunnelTypesView />}
       {activeTab === 'copy-formulas' && <CopyFormulasView />}
       {activeTab === 'health' && <HealthCheckTab />}
+      {activeTab === 'api-tokens' && <APITokensView />}
 
       {activeTab === 'general' && (
         <div className="space-y-6">
