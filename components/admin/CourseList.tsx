@@ -28,10 +28,15 @@ const CourseList: React.FC = () => {
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault(); setCreating(true)
-    const created = await createCourse({ ...newCourse, duration_days: 35, price: 0 })
-    setCreating(false); setShowAdd(false); setNewCourse({ title: '' })
-    if (created) navigate(`/admin/products/courses/${created.id}?tab=settings`)
-    else load()
+    try {
+      const created = await createCourse({ ...newCourse, duration_days: 35, price: 0 })
+      setCreating(false); setShowAdd(false); setNewCourse({ title: '' })
+      if (created) navigate(`/admin/products/courses/${created.id}?tab=settings`)
+      else load()
+    } catch (e: any) {
+      setCreating(false)
+      alert(e.message || 'Tạo khoá học thất bại')
+    }
   }
 
   const STATUS_LABELS: Record<string, string> = { active: 'Đang chạy', draft: 'Bản nháp', archived: 'Đã lưu trữ' }

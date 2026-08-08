@@ -597,13 +597,18 @@ export const fetchCourse = async (id: string): Promise<Course | null> => {
 export const createCourse = async (course: Partial<Course>): Promise<Course | null> => {
   const slug = course.slug || (course.title || 'untitled').toLowerCase()
     .replace(/[^\w\s-]/g, '').replace(/\s+/g, '-').slice(0, 50) + '-' + Date.now().toString(36)
-  const { data } = await supabase.from('courses').insert({
+  const { data, error } = await supabase.from('courses').insert({
     ...course,
     slug,
     status: course.status || 'draft',
     duration_days: course.duration_days || 35,
     price: course.price || 0,
   }).select().single()
+  if (error) {
+    // Surface — silent failure hides RLS/schema issues (e.g. role not owner|admin|sales|support)
+    console.error('[createCourse] failed:', error)
+    throw new Error(`Tạo khoá học thất bại: ${error.message}`)
+  }
   return data
 }
 

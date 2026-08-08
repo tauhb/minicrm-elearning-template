@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { Plus, Edit2, Trash2, ExternalLink, ToggleLeft, ToggleRight, Package, Lock, Globe, BookOpen, Users, Eye, X, Search } from 'lucide-react'
 import { supabase } from '../../services/supabase'
 import { fetchCourses, fetchCustomersForProduct, grantProductToCustomer, revokeProductFromCustomer } from '../../services/api'
@@ -79,6 +80,22 @@ const DigitalProducts: React.FC = () => {
   }
   useEffect(() => { load() }, [])
 
+  // Support ?edit=<id> — auto-open editor when navigated from AllProductsView
+  const [searchParams, setSearchParams] = useSearchParams()
+  useEffect(() => {
+    const editId = searchParams.get('edit')
+    if (!editId || products.length === 0) return
+    const target = products.find(p => p.id === editId)
+    if (target) {
+      setEditing(target)
+      setShowForm(true)
+      // Clear the param so a refresh doesn't re-open
+      const next = new URLSearchParams(searchParams)
+      next.delete('edit')
+      setSearchParams(next, { replace: true })
+    }
+  }, [searchParams, products, setSearchParams])
+
   const openAdd = () => {
     setEditing(null)
     setForm(emptyForm)
@@ -119,14 +136,17 @@ const DigitalProducts: React.FC = () => {
       status: form.status,
       delivery_url: form.delivery_url || null,
     }
-    if (editing) {
-      await supabase.from('products').update(payload).eq('id', editing.id)
-    } else {
-      await supabase.from('products').insert(payload)
+    // Surface errors — Supabase silently drops writes on RLS/schema violations otherwise.
+    const { error } = editing
+      ? await supabase.from('products').update(payload).eq('id', editing.id)
+      : await supabase.from('products').insert(payload)
+    setSaving(false)
+    if (error) {
+      alert(`Lưu sản phẩm thất bại: ${error.message}`)
+      return
     }
     await load()
     setShowForm(false)
-    setSaving(false)
   }
 
   const handleDelete = async (id: string) => {

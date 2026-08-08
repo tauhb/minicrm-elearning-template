@@ -53,13 +53,15 @@ const OnboardingChecklist: React.FC<Props> = ({ onCountChange }) => {
       const { data: { session } } = await supabase.auth.getSession()
       const token = session?.access_token
 
-      const [envRes, productsRes, leadsRes, teamRes, funnelsRes, inboxesRes] = await Promise.all([
+      // Products = courses + products (both tables count as "có sản phẩm để bán").
+      const [envRes, productsRes, coursesRes, leadsRes, teamRes, funnelsRes, inboxesRes] = await Promise.all([
         token
           ? fetch('/api/health/env-check', { headers: { Authorization: `Bearer ${token}` } })
               .then(r => r.ok ? r.json() as Promise<EnvCheckResponse> : null)
               .catch(() => null)
           : Promise.resolve(null),
         supabase.from('products').select('id', { count: 'exact', head: true }),
+        supabase.from('courses').select('id', { count: 'exact', head: true }),
         supabase.from('leads').select('id', { count: 'exact', head: true }),
         supabase.from('customers').select('id', { count: 'exact', head: true }).neq('role', 'student'),
         supabase.from('funnel_flows').select('id', { count: 'exact', head: true }),
@@ -73,7 +75,7 @@ const OnboardingChecklist: React.FC<Props> = ({ onCountChange }) => {
         setEnvOk(null)
         setEnvMissing(0)
       }
-      setProductsCount(productsRes.count ?? 0)
+      setProductsCount((productsRes.count ?? 0) + (coursesRes.count ?? 0))
       setLeadsCount(leadsRes.count ?? 0)
       setTeamCount(teamRes.count ?? 0)
       setFunnelsCount(funnelsRes.count ?? 0)
@@ -120,9 +122,9 @@ const OnboardingChecklist: React.FC<Props> = ({ onCountChange }) => {
       id: 'product',
       icon: Package,
       label: 'Tạo sản phẩm đầu tiên',
-      hint: productsCount > 0 ? `${productsCount} sản phẩm.` : 'Tạo khoá học / sản phẩm số để có thứ bán.',
+      hint: productsCount > 0 ? `${productsCount} sản phẩm.` : 'Tạo sản phẩm đầu tiên (khoá học / ebook / template / membership...) để có thứ bán.',
       done: productsCount > 0,
-      onClick: () => navigate('/admin/products/digital'),
+      onClick: () => navigate('/admin/products'),
     },
     {
       id: 'funnel',
