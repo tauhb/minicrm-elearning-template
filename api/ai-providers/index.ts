@@ -52,7 +52,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const credMap = new Map<string, any>()
       for (const c of (creds || [])) credMap.set(c.provider, c)
 
-      const items = listProviderIds().map(id => {
+      // Hide OAuth-device providers (openai-codex) from the API-key provider list —
+      // they get their own connect flow in a separate section below the list.
+      const items = listProviderIds()
+        .filter(id => AI_PROVIDERS[id].auth_type !== 'oauth-device')
+        .map(id => {
         const cfg = AI_PROVIDERS[id]
         const cred = credMap.get(id)
         return {

@@ -836,7 +836,12 @@ async function assertAdmin(req, res) {
   const { data: { user } } = await userClient.auth.getUser()
   if (!user) { res.status(401).json({ error: 'Invalid token' }); return null }
   const { data: caller } = await userClient.from('customers').select('role').eq('id', user.id).maybeSingle()
-  if (caller?.role !== 'admin') { res.status(403).json({ error: 'Admin only' }); return null }
+  // Wave 0 expanded roles: owner/admin/sales/support all have admin panel access.
+  // OAuth-connect + destructive ops still owner/admin only.
+  if (!['owner', 'admin'].includes(caller?.role || '')) {
+    res.status(403).json({ error: `Chỉ owner/admin mới được thực hiện thao tác này (role hiện tại: ${caller?.role || 'chưa xác định'})` })
+    return null
+  }
   return user
 }
 
