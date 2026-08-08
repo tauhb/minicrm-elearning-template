@@ -30,6 +30,20 @@ interface BroadcastRow {
   error?: string | null
   created_at: string
   creator?: { display_name?: string; email?: string } | null
+  connection_id?: string | null
+  connection?: { name?: string; provider?: string } | null
+}
+
+interface EmailConnection {
+  id: string
+  provider: string
+  provider_label: string
+  provider_config?: { monthly_free?: number; supports_marketing: boolean; supports_transactional: boolean }
+  name: string
+  status: 'active' | 'disabled'
+  is_default_marketing: boolean
+  is_default_transactional: boolean
+  monthly_sent: number
 }
 
 interface EnvInfo {
@@ -88,6 +102,10 @@ export default function EmailMarketingView() {
   const [loadingList, setLoadingList] = useState(true)
   const [env, setEnv] = useState<EnvInfo | null>(null)
 
+  // Multi-provider connections (marketing-capable)
+  const [connections, setConnections] = useState<EmailConnection[]>([])
+  const [connectionId, setConnectionId] = useState<string>('')
+
   // ── Load history + env ────────────────────────────────────────────────
   const loadHistory = useCallback(async () => {
     setLoadingList(true)
@@ -116,6 +134,20 @@ export default function EmailMarketingView() {
     api<{ tags: { tag: string; count: number }[] }>('/api/email/broadcasts?action=tags')
       .then(r => setAvailableTags(r.tags || []))
       .catch(() => setAvailableTags([]))
+  }, [])
+
+  // Load marketing-capable connections; preselect the marketing default.
+  useEffect(() => {
+    api<{ connections: EmailConnection[] }>('/api/email-connections')
+      .then(r => {
+        const active = (r.connections || []).filter(c => c.status === 'active')
+        setConnections(active)
+        const preferred = active.find(c => c.is_default_marketing)
+          || active.find(c => c.provider_config?.supports_marketing)
+          || active[0]
+        if (preferred) setConnectionId(preferred.id)
+      })
+      .catch(() => setConnections([]))
   }, [])
 
   useEffect(() => { loadHistory(); loadEnv() }, [loadHistory, loadEnv])
@@ -168,6 +200,7 @@ export default function EmailMarketingView() {
       if (audience === 'tag') payload.tags = selectedTags
       if (ctaUrl.trim())  payload.ctaUrl = ctaUrl.trim()
       if (ctaText.trim()) payload.ctaText = ctaText.trim()
+      if (connectionId)   payload.connection_id = connectionId
 
       const r = await api<{ success: boolean; sent: number; failed: number; broadcast_id?: string; error?: string }>(
         '/api/email/broadcast',
@@ -289,6 +322,41 @@ export default function EmailMarketingView() {
                 style={{ borderColor: 'var(--theme-border)', color: 'var(--theme-text)' }}
               />
             </div>
+          </div>
+
+          {/* Connection picker (multi-provider) */}
+          <div>
+            <label className="text-xs font-medium text-gray-400 block mb-1">
+              Gửi qua {' '}
+              <a href="/admin/settings#email" className="text-gray-600 hover:text-gray-400 underline">
+                (quản lý kết nối)
+              </a>
+            </label>
+            {connections.length === 0 ? (
+              <div className="border rounded-md p-2 text-xs text-gray-500"
+                   style={{ borderColor: 'var(--theme-border)' }}>
+                Chưa có kết nối email nào. <a href="/admin/settings#email" className="underline">Thêm ở Cài đặt → Email</a>.
+              </div>
+            ) : (
+              <select
+                value={connectionId}
+                onChange={e => setConnectionId(e.target.value)}
+                className="w-full bg-transparent border rounded-md px-3 py-2 text-sm focus:outline-none focus:border-gray-500"
+                style={{ borderColor: 'var(--theme-border)', color: 'var(--theme-text)' }}
+              >
+                {connections.map(c => {
+                  const free = c.provider_config?.monthly_free
+                  const suffix = free ? ` · ${c.monthly_sent.toLocaleString()}/${free.toLocaleString()}` : ` · ${c.monthly_sent.toLocaleString()}`
+                  const canMarket = c.provider_config?.supports_marketing !== false
+                  const label = `${c.name} (${c.provider_label})${suffix}${!canMarket ? ' — chỉ transactional' : ''}${c.is_default_marketing ? ' · ★ default' : ''}`
+                  return (
+                    <option key={c.id} value={c.id} disabled={!canMarket} style={{ background: '#1f2937' }}>
+                      {label}
+                    </option>
+                  )
+                })}
+              </select>
+            )}
           </div>
 
           {/* Audience */}
@@ -525,6 +593,14 @@ const BroadcastRow: React.FC<{ row: BroadcastRow }> = ({ row }) => {
               <span>·</span>
               <span className="flex items-center gap-1">
                 <UserIcon size={11} /> {row.creator.display_name || row.creator.email || 'unknown'}
+              </span>
+            </>
+          )}
+          {row.connection?.name && (
+            <>
+              <span>·</span>
+              <span className="flex items-center gap-1" title={`Provider: ${row.connection.provider}`}>
+                <Mail size={11} /> {row.connection.name}
               </span>
             </>
           )}

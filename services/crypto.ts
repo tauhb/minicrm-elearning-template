@@ -69,3 +69,23 @@ export function tryDecrypt(payload: string | null | undefined): string | null {
     return null
   }
 }
+
+/**
+ * Best-effort decrypt with plaintext fallback.
+ *
+ * Migration friendly: when legacy rows (e.g. app_settings.brevo_api_key that
+ * were stored plaintext) get inserted into a new *_encrypted column by a SQL
+ * seed, this returns the raw payload so callers keep working. First re-save
+ * via UI writes properly-encrypted ciphertext.
+ *
+ * Prefer tryDecrypt() in code paths that only ever handle values written by
+ * encrypt() — this helper trades a bit of ambiguity for backward compat.
+ */
+export function tryDecryptOrRaw(payload: string | null | undefined): string | null {
+  if (!payload) return null
+  try {
+    return decrypt(payload)
+  } catch {
+    return payload
+  }
+}

@@ -1854,6 +1854,8 @@ const server = http.createServer(async (req, nodeRes) => {
       await handleViaImport(mockReq, res, req.url)
     } else if (req.url?.startsWith('/api/ai-providers')) {
       await handleViaImport(mockReq, res, req.url)
+    } else if (req.url?.startsWith('/api/email-connections')) {
+      await handleViaImport(mockReq, res, req.url)
     } else if (req.url?.startsWith('/api/knowledge')) {
       await handleViaImport(mockReq, res, req.url)
     } else if (req.url?.startsWith('/api/customers')) {

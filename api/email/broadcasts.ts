@@ -119,8 +119,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const { data, error } = await admin.from('email_broadcasts')
     .select(`
       id, subject, recipient_filter, recipient_count,
-      sent_count, failed_count, status, error, created_at,
-      creator:customers!email_broadcasts_created_by_fkey(id, display_name, email)
+      sent_count, failed_count, status, error, created_at, connection_id,
+      creator:customers!email_broadcasts_created_by_fkey(id, display_name, email),
+      connection:email_connections!email_broadcasts_connection_id_fkey(id, name, provider)
     `)
     .order('created_at', { ascending: false })
     .limit(limit)

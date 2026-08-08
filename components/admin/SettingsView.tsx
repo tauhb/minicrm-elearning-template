@@ -5,6 +5,7 @@ import { supabase } from '../../services/supabase'
 import { useConfig } from '../../contexts/ConfigContext'
 import AISettingsView from './AISettingsView'
 import AIProvidersView from './AIProvidersView'
+import EmailConnectionsView from './EmailConnectionsView'
 import FunnelTypesView from './FunnelTypesView'
 import CopyFormulasView from './CopyFormulasView'
 import HealthCheckTab from './HealthCheckTab'
@@ -99,7 +100,9 @@ const SettingsView: React.FC = () => {
   const [smtpCopied, setSmtpCopied] = useState<string | null>(null)
 
   // Email sub-tab (Settings > Email)
-  const [emailSubTab, setEmailSubTab] = useState<'settings' | 'marketing'>('settings')
+  //   connections   → new: Multi-provider Email Connections (default)
+  //   supabase-smtp → SMTP guide for Supabase auth emails (magic link / reset)
+  const [emailSubTab, setEmailSubTab] = useState<'connections' | 'supabase-smtp'>('connections')
 
   // Brevo (marketing provider) state
   const [brevoKey, setBrevoKey] = useState('')
@@ -739,8 +742,8 @@ async function provisionAfterPayment(payment) {
           {/* Sub-tabs */}
           <div className="flex gap-1 border-b border-gray-800">
             {([
-              { key: 'settings',  label: 'Cấu hình Email',  icon: Mail },
-              { key: 'marketing', label: 'Email Marketing', icon: Sparkles },
+              { key: 'connections',   label: 'Kết nối',           icon: Mail },
+              { key: 'supabase-smtp', label: 'SMTP cho Supabase', icon: KeyRound },
             ] as const).map(t => {
               const active = emailSubTab === t.key
               return (
@@ -758,178 +761,59 @@ async function provisionAfterPayment(payment) {
             })}
           </div>
 
-          {emailSubTab === 'marketing' && (
-            <>
-              {/* Brevo connection */}
-              <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
-                <div className="flex items-center justify-between mb-1">
-                  <div className="flex items-center gap-2">
-                    <Sparkles size={16} style={{ color: 'var(--color-mission-accent)' }} />
-                    <h2 className="text-sm font-semibold text-white">Brevo (Sendinblue) — Email Marketing</h2>
-                    {emailProvider === 'brevo' && brevoKey && (
-                      <span className="text-[10px] px-2 py-0.5 rounded bg-green-500/10 text-green-400 border border-green-500/30">Đang dùng</span>
-                    )}
-                  </div>
-                  <a href="https://www.brevo.com/" target="_blank" rel="noopener noreferrer"
-                     className="flex items-center gap-1 text-xs text-gray-500 hover:text-white">
-                    Tạo tài khoản (300 email/day free) <ExternalLink size={11} />
-                  </a>
-                </div>
-                <p className="text-xs text-gray-500 mb-4">
-                  Kết nối Brevo để mở khóa broadcast + sequence tự động (welcome series, abandoned cart, re-engagement).
-                  Sau khi lưu API key, mọi email marketing sẽ đi qua Brevo. Email hệ thống (magic link, reset password) vẫn dùng Resend/Supabase.
-                </p>
-                <div className="space-y-3">
+          {emailSubTab === 'connections' && (
+            <div className="space-y-4">
+              {/* Deprecation banner — surfaces once legacy keys remain in app_settings */}
+              {(brevoKey || resendKey) && (
+                <div className="rounded-lg border border-gray-700 bg-gray-800/40 p-3 text-[11px] text-gray-400 flex items-start gap-2">
+                  <Info size={12} className="mt-0.5 flex-shrink-0" />
                   <div>
-                    <label className="block text-xs text-gray-500 mb-1.5">Brevo API Key (v3)</label>
-                    <input
-                      type="password"
-                      value={brevoKey}
-                      onChange={e => setBrevoKey(e.target.value)}
-                      placeholder="xkeysib-..."
-                      className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white font-mono placeholder-gray-600 focus:outline-none focus:border-gray-500"
-                    />
-                    <p className="text-[10px] text-gray-500 mt-1">
-                      Lấy key: Brevo Dashboard → SMTP &amp; API → API Keys → Create a new API key
-                    </p>
+                    Config cũ trong <code className="text-gray-300">app_settings</code> đã được migrate sang <strong>email_connections</strong>.
+                    Từ giờ chỉnh sửa ngay bên dưới — key cũ sẽ được thay bằng bản mã hoá đúng cách khi bạn re-save.
                   </div>
-                  <button
-                    onClick={saveBrevo}
-                    disabled={brevoKeySaving}
-                    className="flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-lg disabled:opacity-50 hover:opacity-90"
-                    style={{ backgroundColor: 'var(--color-mission-accent)', color: '#000' }}
-                  >
-                    {brevoKeySaved ? <Check size={13} /> : null}
-                    {brevoKeySaving ? 'Đang lưu...' : brevoKeySaved ? 'Đã lưu!' : 'Lưu API Key'}
-                  </button>
-                </div>
-              </div>
-
-              {/* Quick actions */}
-              <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
-                <h2 className="text-sm font-semibold text-white mb-3">Hành động nhanh</h2>
-                <div className="space-y-2">
-                  <a href="/admin/email" className="flex items-center gap-3 p-3 rounded-lg border border-gray-800 hover:bg-gray-800 transition">
-                    <Mail size={16} className="text-gray-400" />
-                    <div className="flex-1">
-                      <p className="text-sm text-white">Broadcast + Campaign History</p>
-                      <p className="text-[11px] text-gray-500">Gửi email cho segment leads/customers/tag, xem lịch sử gửi</p>
-                    </div>
-                    <ExternalLink size={13} className="text-gray-500" />
-                  </a>
-                  <a href="https://app.brevo.com/" target="_blank" rel="noopener noreferrer"
-                     className="flex items-center gap-3 p-3 rounded-lg border border-gray-800 hover:bg-gray-800 transition">
-                    <Sparkles size={16} className="text-gray-400" />
-                    <div className="flex-1">
-                      <p className="text-sm text-white">Mở Brevo Cloud Dashboard</p>
-                      <p className="text-[11px] text-gray-500">Campaign builder, template designer, segment builder, open/click tracking</p>
-                    </div>
-                    <ExternalLink size={13} className="text-gray-500" />
-                  </a>
-                </div>
-              </div>
-
-              {/* Provider info */}
-              <div className="text-[11px] text-gray-500 flex items-start gap-2 px-2">
-                <Info size={12} className="mt-0.5 flex-shrink-0" />
-                <div>
-                  Provider hiện tại: <strong className="text-gray-300">{emailProvider || '(chưa cấu hình)'}</strong>.
-                  Có thể chuyển sang các provider khác (Mailgun, SES, Postmark) bằng cách set <code className="text-gray-400">EMAIL_PROVIDER</code> trong .env — hiện chỉ tự động cấu hình Brevo + Resend.
-                </div>
-              </div>
-            </>
-          )}
-
-          {emailSubTab === 'settings' && (
-          <>
-          {/* Resend API Key */}
-          <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
-            <div className="flex items-center justify-between mb-1">
-              <div className="flex items-center gap-2">
-                <KeyRound size={16} style={{ color: 'var(--color-mission-accent)' }} />
-                <h2 className="text-sm font-semibold text-white">Resend API Key</h2>
-              </div>
-              <a
-                href="https://resend.com"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center gap-1 text-xs text-gray-500 hover:text-white transition-colors"
-              >
-                Tạo tài khoản miễn phí <ExternalLink size={11} />
-              </a>
-            </div>
-            <p className="text-xs text-gray-500 mb-4">
-              Dùng để gửi email chào mừng có thương hiệu khi tạo khách hàng theo mode "Đặt mật khẩu". Free 3,000 email/tháng.
-            </p>
-
-            <div className="space-y-3">
-              <input
-                type="password"
-                value={resendKey}
-                onChange={e => setResendKey(e.target.value)}
-                placeholder="re_xxxxxxxxxxxxxxxxxxxxxxxx"
-                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white font-mono placeholder-gray-600 focus:outline-none focus:border-gray-500"
-              />
-
-              {resendKey && (
-                <div className="rounded-lg p-3 text-xs" style={{
-                  backgroundColor: 'rgba(var(--color-mission-accent-rgb,182,255,0),0.06)',
-                  border: '1px solid rgba(var(--color-mission-accent-rgb,182,255,0),0.2)',
-                  color: 'var(--color-mission-accent)',
-                }}>
-                  Email sẽ được gửi từ: <strong>{settings?.title || 'App'} &lt;onboarding@resend.dev&gt;</strong>
-                  <br />
-                  <span className="opacity-70">Để dùng domain riêng, verify domain tại resend.com → Domains</span>
                 </div>
               )}
 
-              <button
-                onClick={handleSaveResendKey}
-                disabled={resendKeySaving || !resendKey}
-                className="flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-lg disabled:opacity-50 transition-opacity hover:opacity-90"
-                style={{ backgroundColor: 'var(--color-mission-accent)', color: '#000' }}
-              >
-                {resendKeySaved ? <Check size={13} /> : null}
-                {resendKeySaving ? 'Đang lưu...' : resendKeySaved ? 'Đã lưu!' : 'Lưu API Key'}
-              </button>
+              <EmailConnectionsView />
             </div>
-          </div>
+          )}
 
-          {/* Supabase SMTP Guide */}
-          <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
-            <div className="flex items-center gap-2 mb-1">
-              <Mail size={16} className="text-blue-400" />
-              <h2 className="text-sm font-semibold text-white">Supabase Custom SMTP</h2>
-            </div>
-            <p className="text-xs text-gray-500 mb-4">
-              Cấu hình để tất cả email auth của Supabase (magic link, reset password) cũng gửi từ tên app của bạn thay vì "Supabase". Copy-paste các giá trị sau vào{' '}
-              <a href="https://supabase.com/dashboard" target="_blank" rel="noopener noreferrer" className="underline hover:text-white">
-                Supabase Dashboard
-              </a>{' '}
-              → Project Settings → Authentication → SMTP Settings.
-            </p>
+          {emailSubTab === 'supabase-smtp' && (
+            <div className="space-y-6">
+              <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
+                <div className="flex items-center gap-2 mb-1">
+                  <Mail size={16} className="text-blue-400" />
+                  <h2 className="text-sm font-semibold text-white">Supabase Custom SMTP</h2>
+                </div>
+                <p className="text-xs text-gray-500 mb-4">
+                  Cấu hình để tất cả email auth của Supabase (magic link, reset password) cũng gửi từ tên app của bạn thay vì "Supabase". Copy-paste các giá trị sau vào{' '}
+                  <a href="https://supabase.com/dashboard" target="_blank" rel="noopener noreferrer" className="underline hover:text-white">
+                    Supabase Dashboard
+                  </a>{' '}
+                  → Project Settings → Authentication → SMTP Settings.
+                </p>
 
-            {[
-              { label: 'Host', value: 'smtp.resend.com' },
-              { label: 'Port', value: '465' },
-              { label: 'Username', value: 'resend' },
-              { label: 'Password', value: resendKey || 're_your_api_key_here' },
-              { label: 'Sender name', value: settings?.title || 'Tên app của bạn' },
-              { label: 'Sender email', value: 'onboarding@resend.dev' },
-            ].map(row => (
-              <div key={row.label} className="flex items-center gap-3 py-2.5 border-b border-gray-800 last:border-0">
-                <span className="text-xs text-gray-500 w-28 shrink-0">{row.label}</span>
-                <code className="flex-1 text-xs text-white font-mono truncate">{row.value}</code>
-                <button
-                  onClick={() => copySMTP(row.value, row.label)}
-                  className="shrink-0 text-gray-600 hover:text-white transition-colors"
-                >
-                  {smtpCopied === row.label ? <Check size={13} className="text-emerald-400" /> : <Copy size={13} />}
-                </button>
+                {[
+                  { label: 'Host', value: 'smtp.resend.com' },
+                  { label: 'Port', value: '465' },
+                  { label: 'Username', value: 'resend' },
+                  { label: 'Password', value: resendKey || 're_your_api_key_here' },
+                  { label: 'Sender name', value: settings?.title || 'Tên app của bạn' },
+                  { label: 'Sender email', value: 'onboarding@resend.dev' },
+                ].map(row => (
+                  <div key={row.label} className="flex items-center gap-3 py-2.5 border-b border-gray-800 last:border-0">
+                    <span className="text-xs text-gray-500 w-28 shrink-0">{row.label}</span>
+                    <code className="flex-1 text-xs text-white font-mono truncate">{row.value}</code>
+                    <button
+                      onClick={() => copySMTP(row.value, row.label)}
+                      className="shrink-0 text-gray-600 hover:text-white transition-colors"
+                    >
+                      {smtpCopied === row.label ? <Check size={13} className="text-emerald-400" /> : <Copy size={13} />}
+                    </button>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
-          </>
+            </div>
           )}
         </div>
       )}

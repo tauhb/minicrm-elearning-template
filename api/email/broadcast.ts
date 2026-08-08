@@ -154,7 +154,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   // ── Validate input ───────────────────────────────────────────────────────
-  const { audience, course_id, emails, tag, tags, subject, body, ctaUrl, ctaText } = req.body || {}
+  const { audience, course_id, emails, tag, tags, subject, body, ctaUrl, ctaText, connection_id } = req.body || {}
   if (!audience) return res.status(400).json({ error: '`audience` required' })
   if (!subject)  return res.status(400).json({ error: '`subject` required' })
   if (!body)     return res.status(400).json({ error: '`body` required' })
@@ -193,6 +193,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       recipient_count: recipients.length,
       status: recipients.length === 0 ? 'sent' : 'sending',
       created_by: user.id,
+      connection_id: connection_id || null,
     })
     .select('id')
     .single()
@@ -224,6 +225,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         to: r.email,
         subject,
         template: 'broadcast',
+        kind: 'marketing',
+        connectionId: connection_id || undefined,
         data: {
           name: r.name,
           body,
