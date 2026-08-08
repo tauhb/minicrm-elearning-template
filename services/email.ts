@@ -78,12 +78,19 @@ function renderEmail(template: EmailTemplate, data: Record<string, any>): string
 }
 
 // ─── App settings helper (read from Supabase) ────────────────────────────────
-async function getAppSettings(): Promise<{ appName: string; resendKey: string }> {
+async function getAppSettings(): Promise<{
+  appName: string
+  resendKey: string
+  brevoKey: string
+  provider: 'brevo' | 'resend'
+}> {
   const supabaseUrl = process.env.VITE_SUPABASE_URL || ''
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || ''
 
   let appName = 'Portal'
   let resendKey = process.env.RESEND_API_KEY || ''
+  let brevoKey  = process.env.BREVO_API_KEY || ''
+  let provider  = (process.env.EMAIL_PROVIDER || '').toLowerCase() as 'brevo' | 'resend' | ''
 
   if (supabaseUrl && serviceKey) {
     try {
@@ -91,43 +98,74 @@ async function getAppSettings(): Promise<{ appName: string; resendKey: string }>
         auth: { autoRefreshToken: false, persistSession: false }
       })
       const { data } = await db.from('app_settings')
-        .select('key, value').in('key', ['title', 'resend_api_key'])
+        .select('key, value').in('key', ['title', 'resend_api_key', 'brevo_api_key', 'email_provider'])
       if (data) {
         const map: Record<string, any> = {}
         data.forEach((r: any) => { map[r.key] = r.value })
         appName = map['title']?.value || appName
         if (!resendKey) resendKey = map['resend_api_key']?.value || ''
+        if (!brevoKey)  brevoKey  = map['brevo_api_key']?.value || ''
+        if (!provider)  provider  = (map['email_provider']?.value || '').toLowerCase()
       }
-    } catch {
-      // Silent — fall back to env defaults
-    }
+    } catch { /* silent */ }
   }
-  return { appName, resendKey }
+  // Auto-pick: if user saved a Brevo key but never set provider, prefer Brevo for marketing.
+  if (!provider) provider = brevoKey ? 'brevo' : 'resend'
+  return { appName, resendKey, brevoKey, provider: provider as 'brevo' | 'resend' }
 }
 
 // ─── Main API ────────────────────────────────────────────────────────────────
 export async function sendEmail(input: SendEmailInput): Promise<SendEmailResult> {
-  const { appName, resendKey } = await getAppSettings()
+  const { appName, resendKey, brevoKey, provider } = await getAppSettings()
 
-  if (!resendKey) {
-    return {
-      ok: false,
-      provider: 'none',
-      error: 'No RESEND_API_KEY configured. Set env var or app_settings.resend_api_key.'
+  const html = renderEmail(input.template, { appName, ...input.data })
+  const to = (Array.isArray(input.to) ? input.to : [input.to]).filter(Boolean)
+  if (!to.length) return { ok: false, provider: 'none', error: 'No recipients' }
+
+  // Provider selection: honor explicit provider setting, fallback to whichever key exists.
+  const useBrevo  = provider === 'brevo'  && brevoKey
+  const useResend = !useBrevo && resendKey
+  if (!useBrevo && !useResend) {
+    return { ok: false, provider: 'none',
+      error: 'Chưa có API key nào (Brevo hoặc Resend). Vào Cài đặt → Email để cấu hình.' }
+  }
+
+  // ── Brevo path (marketing + transactional) ─────────────────────────────
+  if (useBrevo) {
+    const from = input.from || `${appName} <no-reply@brevo.local>`
+    const fromMatch = from.match(/^(.*?)\s*<(.+)>$/)
+    const senderName  = fromMatch?.[1]?.trim() || appName
+    const senderEmail = fromMatch?.[2] || 'no-reply@brevo.local'
+    try {
+      const res = await fetch('https://api.brevo.com/v3/smtp/email', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'accept': 'application/json',
+          'api-key': brevoKey,
+        },
+        body: JSON.stringify({
+          sender: { name: senderName, email: senderEmail },
+          to: to.map(e => ({ email: e })),
+          subject: input.subject,
+          htmlContent: html,
+          replyTo: input.replyTo ? { email: input.replyTo } : undefined,
+        }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) return { ok: false, provider: 'brevo', error: data?.message || `HTTP ${res.status}` }
+      return { ok: true, id: data?.messageId, provider: 'brevo' }
+    } catch (e: any) {
+      return { ok: false, provider: 'brevo', error: e.message || String(e) }
     }
   }
 
-  const html = renderEmail(input.template, { appName, ...input.data })
+  // ── Resend path (transactional / fallback) ─────────────────────────────
   const from = input.from || `${appName} <onboarding@resend.dev>`
-
   try {
     const resend = new Resend(resendKey)
     const res = await resend.emails.send({
-      from,
-      to: Array.isArray(input.to) ? input.to : [input.to],
-      subject: input.subject,
-      html,
-      replyTo: input.replyTo,
+      from, to, subject: input.subject, html, replyTo: input.replyTo,
     })
     if (res.error) return { ok: false, provider: 'resend', error: res.error.message }
     return { ok: true, id: res.data?.id, provider: 'resend' }

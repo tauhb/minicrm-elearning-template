@@ -69,7 +69,8 @@ export default function EmailMarketingView() {
   const [subject, setSubject] = useState('')
   const [body, setBody] = useState('')
   const [audience, setAudience] = useState<AudienceKind>('all-students')
-  const [tag, setTag] = useState('')
+  const [selectedTags, setSelectedTags] = useState<string[]>([])
+  const [availableTags, setAvailableTags] = useState<{ tag: string; count: number }[]>([])
   const [ctaUrl, setCtaUrl] = useState('')
   const [ctaText, setCtaText] = useState('')
 
@@ -110,11 +111,18 @@ export default function EmailMarketingView() {
     }
   }, [])
 
+  // Load available tags for the dropdown (distinct across customers + leads)
+  useEffect(() => {
+    api<{ tags: { tag: string; count: number }[] }>('/api/email/broadcasts?action=tags')
+      .then(r => setAvailableTags(r.tags || []))
+      .catch(() => setAvailableTags([]))
+  }, [])
+
   useEffect(() => { loadHistory(); loadEnv() }, [loadHistory, loadEnv])
 
-  // ── Preview count (debounced when audience/tag changes) ───────────────
+  // ── Preview count (debounced when audience/tags changes) ──────────────
   useEffect(() => {
-    if (audience === 'tag' && !tag.trim()) {
+    if (audience === 'tag' && selectedTags.length === 0) {
       setPreviewCount(null)
       return
     }
@@ -123,7 +131,7 @@ export default function EmailMarketingView() {
     const t = setTimeout(async () => {
       try {
         const params = new URLSearchParams({ action: 'preview', audience })
-        if (audience === 'tag') params.set('tag', tag.trim())
+        if (audience === 'tag') params.set('tags', selectedTags.join(','))
         const r = await api<{ count: number }>(`/api/email/broadcasts?${params}`)
         if (!cancelled) setPreviewCount(r.count)
       } catch {
@@ -133,11 +141,11 @@ export default function EmailMarketingView() {
       }
     }, 350)
     return () => { cancelled = true; clearTimeout(t) }
-  }, [audience, tag])
+  }, [audience, selectedTags])
 
   // ── Send handler ──────────────────────────────────────────────────────
   const canSend = subject.trim().length > 0 && body.trim().length > 0
-    && (audience !== 'tag' || tag.trim().length > 0)
+    && (audience !== 'tag' || selectedTags.length > 0)
     && !sending
 
   const handleSend = async () => {
@@ -157,7 +165,7 @@ export default function EmailMarketingView() {
         subject: subject.trim(),
         body: body.trim(),
       }
-      if (audience === 'tag') payload.tag = tag.trim()
+      if (audience === 'tag') payload.tags = selectedTags
       if (ctaUrl.trim())  payload.ctaUrl = ctaUrl.trim()
       if (ctaText.trim()) payload.ctaText = ctaText.trim()
 
@@ -207,13 +215,14 @@ export default function EmailMarketingView() {
         </a>
       </div>
 
-      {/* Env warnings */}
-      {env && env.warnings.length > 0 && (
+      {/* Only surface a banner when broadcast will actually fail (no key at all).
+          The "provider != brevo" hint is technical noise the user doesn't need. */}
+      {env && !env.has_brevo_key && !env.has_resend_key && (
         <div className="rounded-lg border p-3 flex gap-3 items-start"
-          style={{ borderColor: 'rgba(251,191,36,0.4)', background: 'rgba(251,191,36,0.06)' }}>
-          <AlertTriangle size={16} className="mt-0.5 shrink-0" style={{ color: '#fbbf24' }} />
-          <div className="text-xs space-y-1" style={{ color: '#fbbf24' }}>
-            {env.warnings.map((w, i) => <div key={i}>{w}</div>)}
+          style={{ borderColor: 'rgba(248,113,113,0.4)', background: 'rgba(248,113,113,0.06)' }}>
+          <AlertTriangle size={16} className="mt-0.5 shrink-0" style={{ color: '#f87171' }} />
+          <div className="text-xs" style={{ color: '#f87171' }}>
+            Chưa cấu hình API key nào. <a href="/admin/settings#email" className="underline">Vào Cài đặt → Email</a> để thêm Brevo hoặc Resend.
           </div>
         </div>
       )}
@@ -301,18 +310,47 @@ export default function EmailMarketingView() {
             </div>
             {audience === 'tag' && (
               <div>
-                <label className="text-xs font-medium text-gray-400 block mb-1">Tag (customers + leads)</label>
-                <div className="relative">
-                  <TagIcon size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-500" />
-                  <input
-                    type="text"
-                    value={tag}
-                    onChange={e => setTag(e.target.value)}
-                    placeholder="vd: vip, launch-8"
-                    className="w-full bg-transparent border rounded-md pl-7 pr-3 py-2 text-sm focus:outline-none focus:border-gray-500"
-                    style={{ borderColor: 'var(--theme-border)', color: 'var(--theme-text)' }}
-                  />
-                </div>
+                <label className="text-xs font-medium text-gray-400 block mb-1">
+                  Tags {selectedTags.length > 0 && <span className="text-gray-500">({selectedTags.length} chọn — OR)</span>}
+                </label>
+                {availableTags.length === 0 ? (
+                  <div className="border rounded-md p-3 text-xs text-gray-500 text-center"
+                       style={{ borderColor: 'var(--theme-border)' }}>
+                    Chưa có tag nào. Thêm tag cho lead/customer trước.
+                  </div>
+                ) : (
+                  <div className="border rounded-md p-2 max-h-40 overflow-y-auto"
+                       style={{ borderColor: 'var(--theme-border)' }}>
+                    <div className="flex flex-wrap gap-1.5">
+                      {availableTags.map(({ tag: tName, count }) => {
+                        const active = selectedTags.includes(tName)
+                        return (
+                          <button
+                            key={tName}
+                            type="button"
+                            onClick={() => setSelectedTags(prev =>
+                              active ? prev.filter(t => t !== tName) : [...prev, tName]
+                            )}
+                            className="text-xs px-2 py-1 rounded border transition flex items-center gap-1"
+                            style={active
+                              ? { background: 'var(--color-mission-accent)', color: '#000', borderColor: 'var(--color-mission-accent)' }
+                              : { borderColor: 'var(--theme-border)', color: 'var(--theme-text-muted)' }}
+                          >
+                            <TagIcon size={10} />
+                            {tName}
+                            <span className="opacity-60">·{count}</span>
+                          </button>
+                        )
+                      })}
+                    </div>
+                    {selectedTags.length > 0 && (
+                      <button onClick={() => setSelectedTags([])}
+                        className="mt-2 text-[10px] text-gray-500 hover:text-white">
+                        Bỏ chọn tất cả
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
             )}
           </div>

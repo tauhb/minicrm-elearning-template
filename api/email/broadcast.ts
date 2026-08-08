@@ -46,7 +46,7 @@ interface Recipient { email: string; name: string }
 export async function resolveRecipients(
   admin: SupabaseClient,
   audience: string,
-  opts: { course_id?: string; emails?: string[]; tag?: string }
+  opts: { course_id?: string; emails?: string[]; tag?: string; tags?: string[] }
 ): Promise<Recipient[]> {
   if (audience === 'all-leads') {
     const { data } = await admin.from('leads')
@@ -78,14 +78,17 @@ export async function resolveRecipients(
   }
 
   if (audience === 'tag') {
-    if (!opts.tag) throw new Error('tag required for audience=tag')
-    // Match tag against both customers.tags and leads.tags (array contains).
+    // Accept multiple tags (OR). Backward compat: single opts.tag still works.
+    const tagList = (opts.tags && opts.tags.length ? opts.tags : (opts.tag ? [opts.tag] : []))
+      .map(t => t.trim()).filter(Boolean)
+    if (!tagList.length) throw new Error('tag(s) required for audience=tag')
+    // Overlaps: rows whose tags[] intersects tagList (i.e. has any of them).
     const [{ data: custs }, { data: leadRows }] = await Promise.all([
       admin.from('customers')
-        .select('email, display_name').contains('tags', [opts.tag])
+        .select('email, display_name').overlaps('tags', tagList)
         .not('email', 'is', null),
       admin.from('leads')
-        .select('email, name').contains('tags', [opts.tag])
+        .select('email, name').overlaps('tags', tagList)
         .not('email', 'is', null),
     ])
     const seen = new Set<string>()
@@ -151,7 +154,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   // ── Validate input ───────────────────────────────────────────────────────
-  const { audience, course_id, emails, tag, subject, body, ctaUrl, ctaText } = req.body || {}
+  const { audience, course_id, emails, tag, tags, subject, body, ctaUrl, ctaText } = req.body || {}
   if (!audience) return res.status(400).json({ error: '`audience` required' })
   if (!subject)  return res.status(400).json({ error: '`subject` required' })
   if (!body)     return res.status(400).json({ error: '`body` required' })
@@ -165,14 +168,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   let recipients: Recipient[] = []
   try {
-    recipients = await resolveRecipients(admin, audience, { course_id, emails, tag })
+    recipients = await resolveRecipients(admin, audience, { course_id, emails, tag, tags })
   } catch (e: any) {
     return res.status(400).json({ error: e.message || 'Recipient resolution failed' })
   }
 
   // Build recipient_filter JSONB
   const recipient_filter: Record<string, any> = { kind: audience }
-  if (audience === 'tag' && tag)               recipient_filter.tag = tag
+  if (audience === 'tag') {
+    const persistTags = (tags && tags.length) ? tags : (tag ? [tag] : [])
+    if (persistTags.length === 1) recipient_filter.tag = persistTags[0]
+    else if (persistTags.length > 1) recipient_filter.tags = persistTags
+  }
   if (audience === 'course' && course_id)      recipient_filter.course_id = course_id
   if (audience === 'custom' && Array.isArray(emails))
     recipient_filter.emails = emails.slice(0, 100)  // cap for storage

@@ -57,26 +57,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const action = url.searchParams.get('action')
 
   // ── ENV CHECK ───────────────────────────────────────────────────────────
+  // Merge env vars + app_settings (Settings > Email UI writes there). This is
+  // what makes the "Đang dùng Brevo" pill update after the user pastes their key
+  // in Settings without editing .env.
   if (action === 'env') {
-    const provider = (process.env.EMAIL_PROVIDER || 'resend').toLowerCase()
-    const brevoKey = !!process.env.BREVO_API_KEY
-    const resendKey = !!process.env.RESEND_API_KEY
+    const { data: rows } = await admin.from('app_settings').select('key, value')
+      .in('key', ['email_provider', 'brevo_api_key', 'resend_api_key'])
+    const s: Record<string, string> = {}
+    ;(rows || []).forEach((r: any) => { s[r.key] = (r.value?.value ?? r.value ?? '') as string })
+    const provider = (s['email_provider'] || process.env.EMAIL_PROVIDER || 'resend').toLowerCase()
+    const brevoKey  = !!(s['brevo_api_key']  || process.env.BREVO_API_KEY)
+    const resendKey = !!(s['resend_api_key'] || process.env.RESEND_API_KEY)
     const warnings: string[] = []
     if (provider === 'brevo' && !brevoKey) {
-      warnings.push('EMAIL_PROVIDER=brevo nhưng thiếu BREVO_API_KEY trong .env')
-    }
-    if (provider !== 'brevo') {
-      warnings.push(`EMAIL_PROVIDER hiện tại = "${provider}" (không phải brevo). Broadcast vẫn hoạt động qua provider đang cài, nhưng để dùng campaign builder + segment/tag chuyên sâu nên đặt EMAIL_PROVIDER=brevo + BREVO_API_KEY.`)
+      warnings.push('EMAIL_PROVIDER=brevo nhưng thiếu Brevo API key. Vào Cài đặt → Email → Email Marketing để lưu key.')
     }
     if (!brevoKey && !resendKey) {
-      warnings.push('Không có BREVO_API_KEY hay RESEND_API_KEY — broadcast sẽ fail. Vào Cài đặt → Email hoặc thêm vào .env.local.')
+      warnings.push('Chưa có API key nào (Brevo hoặc Resend) — broadcast sẽ fail. Vào Cài đặt → Email.')
     }
     return res.json({
-      provider,
-      has_brevo_key: brevoKey,
-      has_resend_key: resendKey,
-      warnings,
-      brevo_dashboard_url: 'https://app.brevo.com',
+      provider, has_brevo_key: brevoKey, has_resend_key: resendKey,
+      warnings, brevo_dashboard_url: 'https://app.brevo.com',
     })
   }
 
@@ -84,13 +85,33 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (action === 'preview') {
     const audience = url.searchParams.get('audience') || ''
     const tag = url.searchParams.get('tag') || undefined
+    const tagsParam = url.searchParams.get('tags') || ''
+    const tags = tagsParam.split(',').map(s => s.trim()).filter(Boolean)
     const course_id = url.searchParams.get('course_id') || undefined
     try {
-      const recipients = await resolveRecipients(admin, audience, { tag, course_id })
+      const recipients = await resolveRecipients(admin, audience, { tag, tags, course_id })
       return res.json({ count: recipients.length })
     } catch (e: any) {
       return res.status(400).json({ error: e.message || 'Preview failed', count: 0 })
     }
+  }
+
+  // ── TAGS LIST ───────────────────────────────────────────────────────────
+  // Returns distinct tags from customers + leads for the audience picker dropdown.
+  if (action === 'tags') {
+    const [{ data: custs }, { data: leadRows }] = await Promise.all([
+      admin.from('customers').select('tags').not('tags', 'is', null),
+      admin.from('leads').select('tags').not('tags', 'is', null),
+    ])
+    const counts = new Map<string, number>()
+    for (const row of [...(custs || []), ...(leadRows || [])]) {
+      const arr = (row.tags as string[] | null) || []
+      for (const t of arr) if (t?.trim()) counts.set(t, (counts.get(t) || 0) + 1)
+    }
+    const tags = [...counts.entries()]
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .map(([tag, count]) => ({ tag, count }))
+    return res.json({ tags })
   }
 
   // ── LIST HISTORY (default GET) ──────────────────────────────────────────
