@@ -4,6 +4,7 @@ import type { PortalTheme } from '../../types'
 import { supabase } from '../../services/supabase'
 import { useConfig } from '../../contexts/ConfigContext'
 import AISettingsView from './AISettingsView'
+import AIProvidersView from './AIProvidersView'
 import FunnelTypesView from './FunnelTypesView'
 import CopyFormulasView from './CopyFormulasView'
 import HealthCheckTab from './HealthCheckTab'
@@ -765,7 +766,16 @@ async function provisionAfterPayment(payment) {
         </div>
       )}
 
-      {activeTab === 'ai' && <AISettingsView />}
+      {activeTab === 'ai' && (
+        <div className="space-y-8">
+          <AIProvidersView />
+          <div className="border-t border-gray-800 pt-6">
+            <h3 className="text-sm font-semibold text-white mb-1">OAuth (ChatGPT Codex)</h3>
+            <p className="text-xs text-gray-500 mb-4">Kết nối bằng tài khoản ChatGPT của bạn (dùng subscription, không tính API cost).</p>
+            <AISettingsView />
+          </div>
+        </div>
+      )}
       {activeTab === 'funnel-types' && <FunnelTypesView />}
       {activeTab === 'copy-formulas' && <CopyFormulasView />}
       {activeTab === 'health' && <HealthCheckTab />}
