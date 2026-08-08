@@ -1,6 +1,6 @@
 import React, { useEffect } from 'react'
 import { Routes, Route, NavLink, useNavigate, Navigate } from 'react-router-dom'
-import { LayoutDashboard, Users, List, GitBranch, ShoppingCart, Package, Settings, LogOut, Terminal, GraduationCap, Share2, Sparkles, MessageCircle, CheckSquare, Mail } from 'lucide-react'
+import { LayoutDashboard, Users, List, GitBranch, ShoppingCart, Package, Settings, LogOut, Terminal, GraduationCap, Share2, Sparkles, MessageCircle, CheckSquare, Mail, BookOpen } from 'lucide-react'
 import { supabase } from '../../services/supabase'
 import { useConfig } from '../../contexts/ConfigContext'
 import Dashboard from './Dashboard'
@@ -15,6 +15,7 @@ const AIFunnelsView = React.lazy(() => import('./AIFunnelsView'))
 const ChatView = React.lazy(() => import('./ChatView'))
 const TasksView = React.lazy(() => import('./TasksView'))
 const EmailMarketingView = React.lazy(() => import('./EmailMarketingView'))
+const KnowledgeView = React.lazy(() => import('./KnowledgeView'))
 import NotificationCenter from './NotificationCenter'
 
 const NAV_ITEMS = [
@@ -28,6 +29,7 @@ const NAV_ITEMS = [
   { to: '/admin/ai-funnels', label: 'AI Funnels',   icon: Sparkles },
   { to: '/admin/chat',     label: 'Chat',           icon: MessageCircle },
   { to: '/admin/email',    label: 'Email',          icon: Mail },
+  { to: '/admin/knowledge', label: 'Kho kiến thức', icon: BookOpen },
   { to: '/admin/tasks',    label: 'Tasks',          icon: CheckSquare },
   { to: '/admin/settings', label: 'Cài đặt',        icon: Settings },
 ]
@@ -157,6 +159,7 @@ const AdminLayout: React.FC = () => {
           <Route path="ai-funnels" element={<AIFunnelsView />} />
           <Route path="chat"       element={<ChatView />} />
           <Route path="email"      element={<EmailMarketingView />} />
+          <Route path="knowledge/*" element={<KnowledgeView />} />
           <Route path="tasks"      element={<TasksView />} />
           <Route path="settings"   element={<SettingsView />} />
           <Route path="*"          element={<Navigate to="/admin" replace />} />
