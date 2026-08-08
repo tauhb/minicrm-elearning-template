@@ -5,6 +5,7 @@ import { fetchPipelineStages } from '../../services/api'
 import type { Lead, PipelineStage, Profile } from '../../types'
 import LeadDetail from './LeadDetail'
 import StudentDetailDrawer from './StudentDetailDrawer'
+import { ProviderPicker } from './ProviderPicker'
 import LoadingState from './LoadingState'
 
 interface CannedResponse {
@@ -967,8 +968,17 @@ function InboxManagerModal({ inboxes, onClose, onSaved }: { inboxes: Inbox[]; on
                       className="w-full px-2 py-1 bg-neutral-950 border border-neutral-800 rounded text-xs" />
                   </div>
                 </div>
+                <ProviderPicker
+                  compact
+                  value={(editing as any).auto_reply_config?.provider_id || undefined}
+                  onChange={(id) => setEditing(prev => ({ ...prev, auto_reply_config: { ...((prev as any).auto_reply_config || {}), provider_id: id || undefined } } as any))}
+                  model={(editing as any).auto_reply_config?.model}
+                  onModelChange={(m) => setEditing(prev => ({ ...prev, auto_reply_config: { ...((prev as any).auto_reply_config || {}), model: m || undefined } } as any))}
+                  label="AI cho bot reply"
+                />
                 <p className="text-[10px] text-neutral-600">
-                  Bot dùng RAG (Kho kiến thức) + AI provider mặc định. Khách nói "chuyển agent" → bot im. Sau khi human agent trả lời → bot im vĩnh viễn.
+                  Bot dùng RAG (Kho kiến thức) + AI provider chọn ở trên (mặc định → auto pick).
+                  Khách nói "chuyển agent" → bot im. Sau khi human agent trả lời → bot im vĩnh viễn.
                 </p>
               </div>
             )}

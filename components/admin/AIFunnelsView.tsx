@@ -5,6 +5,7 @@ import { StylePicker, StylePreset } from './funnels/StylePicker'
 import { ContentDraftEditor, CopyDraft, ensureBlockIds, newBlockId } from './funnels/ContentDraftEditor'
 import { PaymentConfigDrawer } from './funnels/PaymentConfigDrawer'
 import { PreviewFlowModal } from './funnels/PreviewFlowModal'
+import { ProviderPicker } from './ProviderPicker'
 import { FormFieldsEditor, FormField } from './funnels/FormFieldsEditor'
 import { AddBlockModal } from './funnels/AddBlockModal'
 
@@ -805,6 +806,9 @@ function StepEditor({ step, funnel, onSaved }: { step: StepDetail; funnel: Funne
   const [importHtml, setImportHtml] = useState('')
   const [importConfig, setImportConfig] = useState({ strip_external_scripts: true, override_form_action: true, auto_tag_ctas: true })
   const [busy, setBusy] = useState<false | 'draft' | 'approve' | 'import' | 'save' | 'product'>(false)
+  // Per-step AI provider override (undefined = backend fallback chain)
+  const [providerId, setProviderId] = useState<string | undefined>(undefined)
+  const [modelOverride, setModelOverride] = useState<string | undefined>(undefined)
   const [error, setError] = useState<string | null>(null)
   const [previewMode, setPreviewMode] = useState<'preview' | 'code'>('preview')
 
@@ -926,12 +930,12 @@ function StepEditor({ step, funnel, onSaved }: { step: StepDetail; funnel: Funne
       const block = copyDraft.blocks[blockIndex]
       await api(`/api/funnel-steps?action=regenerate-block&id=${step.id}`, {
         method: 'POST',
-        body: JSON.stringify({
+        body: JSON.stringify(withProvider({
           block_index: blockIndex,
           content: block?.content,
           extras: block?.extras,
           render_instructions: renderInstructions,
-        }),
+        })),
       })
       setDirtyIndices(prev => prev.filter(i => i !== blockIndex))
       onSaved()
@@ -984,12 +988,19 @@ function StepEditor({ step, funnel, onSaved }: { step: StepDetail; funnel: Funne
     finally { setBusy(false) }
   }
 
+  // Attach provider/model to any AI POST body so backend routes to the picked provider.
+  const withProvider = (payload: any) => ({
+    ...payload,
+    ...(providerId ? { provider: providerId } : {}),
+    ...(modelOverride ? { model: modelOverride } : {}),
+  })
+
   const draftAI = async () => {
     setError(null); setBusy('draft')
     try {
       const r = await api<{ draft: CopyDraft }>(`/api/funnel-steps?action=draft&id=${step.id}`, {
         method: 'POST',
-        body: JSON.stringify({ formula_key: formulaKey, raw_input: rawInput }),
+        body: JSON.stringify(withProvider({ formula_key: formulaKey, raw_input: rawInput })),
       })
       setCopyDraft(r.draft)
       setTab('outline')   // Auto-switch to outline after successful draft
@@ -1003,7 +1014,7 @@ function StepEditor({ step, funnel, onSaved }: { step: StepDetail; funnel: Funne
     try {
       await api(`/api/funnel-steps?action=approve&id=${step.id}`, {
         method: 'POST',
-        body: JSON.stringify({ copy_draft: copyDraft, render_instructions: renderInstructions }),
+        body: JSON.stringify(withProvider({ copy_draft: copyDraft, render_instructions: renderInstructions })),
       })
       setDirtyIndices([])
       onSaved()
@@ -1153,6 +1164,14 @@ function StepEditor({ step, funnel, onSaved }: { step: StepDetail; funnel: Funne
                     className="w-full px-3 py-2 bg-neutral-900 border border-neutral-800 rounded-lg text-sm" rows={5}
                     placeholder="Nếu bỏ trống, AI dùng shared_context của funnel làm chính. Điền thêm nếu step này cần info riêng." />
                 </div>
+                <ProviderPicker
+                  compact
+                  value={providerId}
+                  onChange={setProviderId}
+                  model={modelOverride}
+                  onModelChange={setModelOverride}
+                  label="AI dùng cho draft/approve/regenerate"
+                />
                 <button onClick={draftAI} disabled={busy !== false}
                   style={{ background: 'var(--color-mission-accent)', color: '#000' }}
                   className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 font-semibold rounded-lg hover:opacity-90 disabled:opacity-40">

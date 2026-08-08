@@ -45,6 +45,35 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const providerId = url.searchParams.get('id') || url.searchParams.get('provider') || ''
 
   try {
+    // ── GET ?action=usable — CONNECTED providers only, INCLUDING oauth-device (Codex).
+    // Used by per-operation pickers (DistillModal, chat auto-reply config, funnel step gen).
+    // Sort: is_default first, then openai-codex if connected, then most-recently used.
+    if (req.method === 'GET' && action === 'usable') {
+      const { data: creds } = await admin.from('provider_credentials')
+        .select('provider, auth_type, status, default_model, is_default, account_email, last_used_at')
+        .in('status', ['active', 'expiring'])
+      const items = (creds || [])
+        .filter(c => AI_PROVIDERS[c.provider])
+        .map(c => {
+          const cfg = AI_PROVIDERS[c.provider]
+          return {
+            id: c.provider, label: cfg.label, auth_type: c.auth_type,
+            default_model: c.default_model || cfg.default_model,
+            suggested_models: cfg.suggested_models,
+            is_default: !!c.is_default,
+            account_email: c.account_email,
+            last_used_at: c.last_used_at,
+          }
+        })
+        .sort((a, b) => {
+          if (a.is_default !== b.is_default) return a.is_default ? -1 : 1
+          if (a.id === 'openai-codex' && b.id !== 'openai-codex') return -1
+          if (b.id === 'openai-codex' && a.id !== 'openai-codex') return 1
+          return (b.last_used_at || '').localeCompare(a.last_used_at || '')
+        })
+      return res.status(200).json({ providers: items })
+    }
+
     // ── GET: registry merged with connected credentials
     if (req.method === 'GET') {
       const { data: creds } = await admin.from('provider_credentials')

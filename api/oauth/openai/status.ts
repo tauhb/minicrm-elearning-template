@@ -36,7 +36,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   )
 
   const { data: cred } = await admin.from('provider_credentials')
-    .select('provider, auth_type, display_name, status, base_url, expires_at, account_email, connected_at, last_refreshed_at, last_used_at')
+    .select('provider, auth_type, display_name, status, base_url, expires_at, account_email, connected_at, last_refreshed_at, last_used_at, is_default')
     .eq('provider', 'openai-codex')
     .maybeSingle()
 
@@ -59,5 +59,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     last_used_at: cred.last_used_at,
     expires_at: cred.expires_at,
     expired,
+    is_default: !!cred.is_default,
   })
 }

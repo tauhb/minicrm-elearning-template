@@ -10,6 +10,7 @@ import { supabase } from '../../services/supabase'
 import EmptyState from './EmptyState'
 import LoadingState from './LoadingState'
 import TagsEditor from './TagsEditor'
+import { ProviderPicker } from './ProviderPicker'
 
 // ─── types ───────────────────────────────────────────────────────────────────
 
@@ -658,6 +659,8 @@ const DistillModal: React.FC<{ kbId: string; onClose: () => void; onDone: () => 
   const [fileName, setFileName] = useState('')
   const [fileMime, setFileMime] = useState('')
   const [productHint, setProductHint] = useState('')
+  const [providerId, setProviderId] = useState<string | undefined>(undefined)
+  const [model, setModel] = useState<string | undefined>(undefined)
   const [status, setStatus] = useState<'idle' | 'uploading' | 'ingesting' | 'done'>('idle')
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<{ entries_created: number; entry_ids: string[]; distill_notes?: string } | null>(null)
@@ -719,6 +722,8 @@ const DistillModal: React.FC<{ kbId: string; onClose: () => void; onDone: () => 
       payload.source_ref = { kind: 'image', filename: fileName }
     }
     if (productHint.trim()) payload.product_hint = productHint.trim()
+    if (providerId) payload.provider_id = providerId
+    if (model) payload.model = model
 
     setStatus('ingesting')
     try {
@@ -826,6 +831,14 @@ const DistillModal: React.FC<{ kbId: string; onClose: () => void; onDone: () => 
               )}
             </div>
           )}
+
+          <ProviderPicker
+            value={providerId}
+            onChange={setProviderId}
+            model={model}
+            onModelChange={setModel}
+            label="AI dùng cho distill (chọn ChatGPT nếu có OAuth)"
+          />
 
           <Field label="Product hint (tuỳ chọn)">
             <input value={productHint} onChange={e => setProductHint(e.target.value)}

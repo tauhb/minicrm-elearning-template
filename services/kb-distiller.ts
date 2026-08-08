@@ -120,12 +120,13 @@ function normalizeFilename(name: string): string {
  */
 export async function distillRawText(
   text: string,
-  opts?: { productHint?: string; providerHint?: string }
+  opts?: { productHint?: string; providerHint?: string; modelHint?: string }
 ): Promise<KBEntryDraft[]> {
   if (!text?.trim()) return []
 
   const result = await runCompletion({
-    provider: opts?.providerHint,          // undefined → uses is_default provider
+    provider: opts?.providerHint,          // undefined → backend fallback chain (default → codex → any)
+    model: opts?.modelHint,
     systemPrompt: SYSTEM_PROMPT,
     userPrompt: buildUserPrompt(text, opts),
     temperature: 0.3,

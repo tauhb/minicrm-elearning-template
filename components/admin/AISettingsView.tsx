@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react'
-import { Sparkles, Check, X, Loader2, ExternalLink, Copy, Zap, AlertTriangle, LogOut, RefreshCw } from 'lucide-react'
+import { Sparkles, Check, X, Loader2, ExternalLink, Copy, Zap, AlertTriangle, LogOut, RefreshCw, Star } from 'lucide-react'
 import { supabase } from '../../services/supabase'
 
 interface OAuthStatus {
@@ -13,6 +13,7 @@ interface OAuthStatus {
   connected_at?: string
   expires_at?: string | null
   expired?: boolean
+  is_default?: boolean
 }
 
 interface DeviceSession {
@@ -207,9 +208,28 @@ export default function AISettingsView() {
             </p>
           </div>
           {status?.connected ? (
-            <span className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 bg-green-500/10 text-green-400 border border-green-500/30 rounded-full">
-              <Check className="w-3 h-3" /> Connected
-            </span>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={async () => {
+                  try {
+                    await apiCall('/api/ai-providers?action=set-default&id=openai-codex', { method: 'POST', body: '{}' })
+                    await loadStatus()
+                  } catch (e: any) { alert(e.message) }
+                }}
+                title={status.is_default ? 'Đang là default cho mọi AI call' : 'Đặt Codex làm default AI provider'}
+                className={`inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full border transition ${
+                  status.is_default
+                    ? 'bg-yellow-500/10 text-yellow-400 border-yellow-500/30'
+                    : 'bg-neutral-800 text-neutral-400 border-neutral-700 hover:border-yellow-500/40 hover:text-yellow-400'
+                }`}
+              >
+                <Star className={`w-3 h-3 ${status.is_default ? 'fill-current' : ''}`} />
+                {status.is_default ? 'Đang là default' : 'Đặt làm default'}
+              </button>
+              <span className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 bg-green-500/10 text-green-400 border border-green-500/30 rounded-full">
+                <Check className="w-3 h-3" /> Connected
+              </span>
+            </div>
           ) : (
             <span className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 bg-neutral-500/10 text-neutral-400 border border-neutral-500/30 rounded-full">
               <X className="w-3 h-3" /> Not connected

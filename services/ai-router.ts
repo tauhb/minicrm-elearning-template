@@ -61,17 +61,44 @@ function admin() {
   )
 }
 
+/**
+ * Resolve credential to use for a completion call. Selection chain when no
+ * explicit provider id is passed:
+ *   1. is_default=true credential (user explicitly starred one)
+ *   2. openai-codex if connected (ChatGPT OAuth is invisible in the AI Providers
+ *      list — hidden by design — so users often forget it's a valid default.
+ *      Prefer it when nothing else is chosen, since it costs nothing extra on
+ *      top of the user's ChatGPT subscription)
+ *   3. Any active credential, most recently connected first
+ * Returns a friendly, actionable error only when NONE of the above exists.
+ */
 async function loadCred(providerId?: string): Promise<LoadedCred> {
   const db = admin()
 
-  const q = db.from('provider_credentials').select('*')
-  const { data: cred } = providerId
-    ? await q.eq('provider', providerId).maybeSingle()
-    : await q.eq('is_default', true).maybeSingle()
-
-  if (!cred) {
-    if (providerId) throw new Error(`Provider ${providerId} not connected. Connect via Settings → AI Providers.`)
-    throw new Error(`No default AI provider set. Choose one in Settings → AI Providers.`)
+  let cred: any = null
+  if (providerId) {
+    const r = await db.from('provider_credentials').select('*').eq('provider', providerId).maybeSingle()
+    cred = r.data
+    if (!cred) throw new Error(`Provider ${providerId} not connected. Connect via Settings → AI Providers.`)
+  } else {
+    // (1) explicit default
+    const r1 = await db.from('provider_credentials').select('*').eq('is_default', true).maybeSingle()
+    cred = r1.data
+    // (2) openai-codex fallback
+    if (!cred) {
+      const r2 = await db.from('provider_credentials').select('*')
+        .eq('provider', 'openai-codex').in('status', ['active', 'expiring']).maybeSingle()
+      cred = r2.data
+    }
+    // (3) any active, newest first
+    if (!cred) {
+      const r3 = await db.from('provider_credentials').select('*')
+        .in('status', ['active', 'expiring']).order('connected_at', { ascending: false }).limit(1).maybeSingle()
+      cred = r3.data
+    }
+    if (!cred) {
+      throw new Error('Chưa kết nối AI provider nào. Vào Cài đặt → AI Providers để kết nối (khuyến nghị: OpenAI, hoặc ChatGPT OAuth nếu có subscription).')
+    }
   }
   if (cred.status !== 'active' && cred.status !== 'expiring') {
     throw new Error(`Provider ${cred.provider} status=${cred.status}. Reconnect via Settings → AI Providers.`)

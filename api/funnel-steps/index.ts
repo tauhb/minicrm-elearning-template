@@ -148,7 +148,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       })
 
       const result = await runCompletion({
-        provider: 'openai-codex',
+        provider: body.provider || 'openai-codex',
         model: body.model,
         systemPrompt: system,
         userPrompt: user,
@@ -224,7 +224,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             funnelId: step.funnel_id, stepId: step.id, block, style, stepMeta, renderInstructions,
           })
           const r = await runCompletion({
-            provider: 'openai-codex', model: body.model,
+            provider: body.provider || 'openai-codex', model: body.model,
             systemPrompt: system, userPrompt: user,
           })
           let sectionHtml = r.text.trim()
@@ -275,7 +275,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         html_generated_from_copy_at: new Date().toISOString(),
         render_instructions: renderInstructions ?? null,
         generation_meta: {
-          provider: 'openai-codex', model: body.model || 'gpt-5.6-sol',
+          provider: body.provider || 'openai-codex', model: body.model || 'gpt-5.6-sol',
           usage: totalUsage, generatedAt: new Date().toISOString(),
           blocks_rendered: htmlBlocks.length, block_errors: errors.length,
         },
@@ -319,7 +319,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           const { system, user } = await composeBlockRenderPrompts({
             funnelId: step.funnel_id, stepId: step.id, block, style, stepMeta, renderInstructions,
           })
-          const r = await runCompletion({ provider: 'openai-codex', model: body.model, systemPrompt: system, userPrompt: user })
+          const r = await runCompletion({ provider: body.provider || 'openai-codex', model: body.model, systemPrompt: system, userPrompt: user })
           usage = r.usage
           let s = r.text.trim()
           const fence = s.match(/^```(?:html)?\s*\n?([\s\S]*?)\n?```$/)
@@ -514,7 +514,7 @@ KHÔNG wrap markdown code fence. Chỉ pure JSON. Tiếng Việt, dùng "bạn".
         : `Sinh content JSON cho block kind "${hintKind}" — phù hợp với funnel context + không lặp blocks khác.`)
 
       try {
-        const r = await runCompletion({ provider: 'openai-codex', model: body.model, systemPrompt, userPrompt: contextLines.join('\n'), maxTokens: 2000 })
+        const r = await runCompletion({ provider: body.provider || 'openai-codex', model: body.model, systemPrompt, userPrompt: contextLines.join('\n'), maxTokens: 2000 })
         let text = r.text.trim()
         const fence = text.match(/^```(?:json)?\s*\n?([\s\S]*?)\n?```$/)
         if (fence) text = fence[1].trim()

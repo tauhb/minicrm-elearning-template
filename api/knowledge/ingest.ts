@@ -166,6 +166,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const body = req.body || {}
   const kind = String(body.kind || '')
   const sourceRef = body.source_ref || null
+  // Per-op AI picker: undefined → backend fallback chain
+  const providerHint: string | undefined = body.provider_id || undefined
+  const modelHint: string | undefined = body.model || undefined
 
   try {
     // ── Step 1: extract to text ──
@@ -205,6 +208,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // ── Step 2: distill → structured entries ──
     const drafts = await distillRawText(extracted.text, {
       productHint: kb.name,
+      providerHint,
+      modelHint,
     })
     if (!drafts.length) {
       return res.status(500).json({ error: 'Distiller không tạo được entry nào. Nội dung có thể quá ngắn / không rõ chủ đề.' })
