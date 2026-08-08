@@ -6,7 +6,7 @@ import React, { useEffect, useState, useCallback } from 'react'
 import { supabase } from '../../services/supabase'
 import {
   Check, X, Zap, Loader2, KeyRound, ExternalLink, Trash2, Star, Play,
-  ChevronRight,
+  ChevronRight, RefreshCw,
 } from 'lucide-react'
 
 interface Provider {
@@ -282,17 +282,78 @@ function ConnectForm({ provider, submitting, onSubmit }: {
 
 function ModelPicker({ provider, onPin }: { provider: Provider; onPin: (model: string) => void }) {
   const [selected, setSelected] = useState(provider.default_model)
+  // Live models fetched from provider's /models endpoint. In-memory only per Q2=A —
+  // survives while the expanded row stays open; refetch on demand.
+  const [liveModels, setLiveModels] = useState<string[] | null>(null)
+  const [fetchedAt, setFetchedAt] = useState<Date | null>(null)
+  const [fetching, setFetching] = useState(false)
+  const [fetchError, setFetchError] = useState<string | null>(null)
+
+  const modelOptions = liveModels ?? provider.suggested_models
+  const source: 'live' | 'suggested' = liveModels ? 'live' : 'suggested'
+
+  const refresh = async () => {
+    setFetching(true); setFetchError(null)
+    try {
+      const r = await api<{ models?: string[]; error?: string }>(
+        `/api/ai-providers?action=list-models&id=${encodeURIComponent(provider.id)}`,
+        { method: 'POST', body: '{}' }
+      )
+      if (!r.models || r.models.length === 0) {
+        setFetchError('Provider trả về list rỗng — dùng list mặc định.')
+      } else {
+        setLiveModels(r.models)
+        setFetchedAt(new Date())
+        // If current selection isn't in the new list, keep it (user might have pinned an unlisted one)
+      }
+    } catch (e: any) {
+      setFetchError(e.message || 'Fetch fail')
+    } finally { setFetching(false) }
+  }
+
+  const relTime = (d: Date) => {
+    const s = Math.round((Date.now() - d.getTime()) / 1000)
+    if (s < 60)   return `${s}s trước`
+    if (s < 3600) return `${Math.round(s / 60)}p trước`
+    return `${Math.round(s / 3600)}h trước`
+  }
+
   return (
     <div className="space-y-2">
-      <label className="text-[11px] text-gray-400 block">Model mặc định (khi funnel/step không chỉ định)</label>
+      <div className="flex items-center justify-between">
+        <label className="text-[11px] text-gray-400 block">
+          Model mặc định (khi funnel/step không chỉ định)
+        </label>
+        <span
+          className={`text-[9px] px-1.5 py-0.5 rounded border ${
+            source === 'live'
+              ? 'bg-green-500/10 text-green-400 border-green-500/30'
+              : 'bg-gray-800 text-gray-500 border-gray-700'
+          }`}
+          title={source === 'live' ? `Fetched ${fetchedAt ? relTime(fetchedAt) : ''}` : 'Danh sách sẵn có (chưa fetch từ provider)'}
+        >
+          {source === 'live' ? `✓ Live · ${fetchedAt ? relTime(fetchedAt) : ''}` : '📋 Suggested'}
+        </span>
+      </div>
       <div className="flex gap-2">
         <select
           value={selected}
           onChange={e => setSelected(e.target.value)}
           className="flex-1 px-2 py-1.5 bg-gray-900 border border-gray-700 rounded text-xs text-white"
         >
-          {provider.suggested_models.map(m => <option key={m} value={m}>{m}</option>)}
+          {modelOptions.map(m => <option key={m} value={m}>{m}</option>)}
+          {selected && !modelOptions.includes(selected) && (
+            <option value={selected}>{selected} (pinned, không có trong list)</option>
+          )}
         </select>
+        <button
+          onClick={refresh}
+          disabled={fetching}
+          title="Cập nhật danh sách models từ provider"
+          className="px-2.5 py-1.5 text-xs border border-gray-700 rounded hover:bg-gray-800 disabled:opacity-40 flex items-center gap-1"
+        >
+          {fetching ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+        </button>
         <button
           onClick={() => onPin(selected)}
           disabled={selected === provider.default_model}
@@ -301,6 +362,12 @@ function ModelPicker({ provider, onPin }: { provider: Provider; onPin: (model: s
           Ghi
         </button>
       </div>
+      {fetchError && (
+        <p className="text-[10px] text-amber-400">⚠ {fetchError}</p>
+      )}
+      {liveModels && (
+        <p className="text-[10px] text-gray-500">{liveModels.length} models từ provider.</p>
+      )}
     </div>
   )
 }

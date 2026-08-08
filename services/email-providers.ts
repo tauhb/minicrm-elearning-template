@@ -16,7 +16,8 @@ export interface EmailProviderConfig {
   id: string
   label: string
   auth: EmailAuthType
-  docs_url: string
+  docs_url: string                 // where user creates the API key
+  dashboard_url?: string           // where user manages campaigns/logs/analytics (for the "Mở [Provider] Dashboard" button)
   supports_marketing: boolean
   supports_transactional: boolean
   monthly_free?: number
@@ -31,6 +32,7 @@ export const EMAIL_PROVIDERS: Record<string, EmailProviderConfig> = {
   resend: {
     id: 'resend', label: 'Resend', auth: 'api-key',
     docs_url: 'https://resend.com/api-keys',
+    dashboard_url: 'https://resend.com/emails',
     supports_marketing: true, supports_transactional: true,
     monthly_free: 3000, best_for: 'transactional',
     from_email_hint: 'Dùng onboarding@resend.dev cho test; verify domain thật cho production.',
@@ -38,6 +40,7 @@ export const EMAIL_PROVIDERS: Record<string, EmailProviderConfig> = {
   brevo: {
     id: 'brevo', label: 'Brevo', auth: 'api-key',
     docs_url: 'https://app.brevo.com/settings/keys/api',
+    dashboard_url: 'https://app.brevo.com',
     supports_marketing: true, supports_transactional: true,
     monthly_free: 9000, best_for: 'marketing',
     from_email_hint: 'Email phải được verify trong Brevo → Senders & IP.',
@@ -45,23 +48,27 @@ export const EMAIL_PROVIDERS: Record<string, EmailProviderConfig> = {
   mailgun: {
     id: 'mailgun', label: 'Mailgun', auth: 'api-key',
     docs_url: 'https://app.mailgun.com/settings/api_security',
+    dashboard_url: 'https://app.mailgun.com',
     supports_marketing: true, supports_transactional: true,
     requires_domain: true, disabled: true,
   },
   sendgrid: {
     id: 'sendgrid', label: 'SendGrid', auth: 'api-key',
     docs_url: 'https://app.sendgrid.com/settings/api_keys',
+    dashboard_url: 'https://app.sendgrid.com/email_activity',
     supports_marketing: true, supports_transactional: true, disabled: true,
   },
   ses: {
     id: 'ses', label: 'Amazon SES', auth: 'aws-sig',
     docs_url: 'https://console.aws.amazon.com/ses',
+    dashboard_url: 'https://console.aws.amazon.com/ses',
     supports_marketing: true, supports_transactional: true,
     requires_region: true, disabled: true,
   },
   postmark: {
     id: 'postmark', label: 'Postmark', auth: 'api-key',
     docs_url: 'https://account.postmarkapp.com/servers',
+    dashboard_url: 'https://account.postmarkapp.com/servers',
     supports_marketing: false, supports_transactional: true,
     best_for: 'transactional', disabled: true,
   },

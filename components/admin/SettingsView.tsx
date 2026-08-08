@@ -761,22 +761,7 @@ async function provisionAfterPayment(payment) {
             })}
           </div>
 
-          {emailSubTab === 'connections' && (
-            <div className="space-y-4">
-              {/* Deprecation banner — surfaces once legacy keys remain in app_settings */}
-              {(brevoKey || resendKey) && (
-                <div className="rounded-lg border border-gray-700 bg-gray-800/40 p-3 text-[11px] text-gray-400 flex items-start gap-2">
-                  <Info size={12} className="mt-0.5 flex-shrink-0" />
-                  <div>
-                    Config cũ trong <code className="text-gray-300">app_settings</code> đã được migrate sang <strong>email_connections</strong>.
-                    Từ giờ chỉnh sửa ngay bên dưới — key cũ sẽ được thay bằng bản mã hoá đúng cách khi bạn re-save.
-                  </div>
-                </div>
-              )}
-
-              <EmailConnectionsView />
-            </div>
-          )}
+          {emailSubTab === 'connections' && <EmailConnectionsView />}
 
           {emailSubTab === 'supabase-smtp' && (
             <div className="space-y-6">

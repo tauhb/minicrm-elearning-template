@@ -38,7 +38,12 @@ interface EmailConnection {
   id: string
   provider: string
   provider_label: string
-  provider_config?: { monthly_free?: number; supports_marketing: boolean; supports_transactional: boolean }
+  provider_config?: {
+    monthly_free?: number
+    supports_marketing: boolean
+    supports_transactional: boolean
+    dashboard_url?: string
+  }
   name: string
   status: 'active' | 'disabled'
   is_default_marketing: boolean
@@ -222,30 +227,33 @@ export default function EmailMarketingView() {
   // ── Layout ────────────────────────────────────────────────────────────
   return (
     <div className="p-8 max-w-6xl mx-auto space-y-6">
-      {/* Header */}
+      {/* Header — dynamic dashboard buttons per connected provider (one per unique provider) */}
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
-          <p className="text-xs uppercase tracking-widest mb-1" style={{ color: 'var(--theme-text-muted)' }}>
-            Marketing · Wave 2
-          </p>
           <h1 className="text-2xl font-bold flex items-center gap-3" style={{ color: 'var(--theme-text)' }}>
             <Mail size={22} /> Email Marketing
           </h1>
           <p className="text-sm text-gray-500 mt-1">
-            Broadcast nhanh + xem lịch sử. Cho campaign builder / template designer, mở Brevo dashboard.
+            Broadcast nhanh + xem lịch sử gửi.
           </p>
         </div>
-        <a
-          href={env?.brevo_dashboard_url || 'https://app.brevo.com'}
-          target="_blank" rel="noopener noreferrer"
-          className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold border transition-colors hover:opacity-90"
-          style={{
-            borderColor: 'var(--color-mission-accent)',
-            color: 'var(--color-mission-accent)',
-          }}
-        >
-          Mở Brevo Dashboard <ExternalLink size={14} />
-        </a>
+        <div className="flex items-center gap-2 flex-wrap">
+          {Array.from(new Map(
+            connections
+              .filter(c => c.provider_config?.dashboard_url)
+              .map(c => [c.provider, { label: c.provider_label, url: c.provider_config!.dashboard_url! }])
+          ).values()).map(({ label, url }) => (
+            <a
+              key={url}
+              href={url}
+              target="_blank" rel="noopener noreferrer"
+              className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold border transition-colors hover:opacity-90"
+              style={{ borderColor: 'var(--color-mission-accent)', color: 'var(--color-mission-accent)' }}
+            >
+              Mở {label} Dashboard <ExternalLink size={14} />
+            </a>
+          ))}
+        </div>
       </div>
 
       {/* Only surface a banner when broadcast will actually fail (no key at all).
@@ -506,36 +514,6 @@ export default function EmailMarketingView() {
             {broadcasts.map(b => <BroadcastRow key={b.id} row={b} />)}
           </div>
         )}
-      </section>
-
-      {/* Brevo deep link card */}
-      <section className="rounded-xl border p-6 flex items-start gap-4"
-        style={{
-          borderColor: 'var(--color-mission-accent)',
-          background: 'rgba(var(--color-mission-accent-rgb, 182, 255, 0), 0.05)',
-        }}>
-        <div className="rounded-lg p-3 shrink-0"
-          style={{ background: 'rgba(var(--color-mission-accent-rgb, 182, 255, 0), 0.15)' }}>
-          <ExternalLink size={20} style={{ color: 'var(--color-mission-accent)' }} />
-        </div>
-        <div className="flex-1">
-          <h3 className="text-sm font-bold mb-1" style={{ color: 'var(--theme-text)' }}>
-            Cần campaign builder, template designer, segment builder?
-          </h3>
-          <p className="text-xs mb-3" style={{ color: 'var(--theme-text-muted)' }}>
-            Broadcast ở đây phù hợp gửi nhanh. Với campaign nhiều bước, A/B test,
-            drag-and-drop template, segment nâng cao, open/click tracking chi tiết
-            — dùng Brevo Cloud dashboard (đã đồng bộ list với portal qua BREVO_LIST_ID_*).
-          </p>
-          <a
-            href={env?.brevo_dashboard_url || 'https://app.brevo.com'}
-            target="_blank" rel="noopener noreferrer"
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-opacity hover:opacity-90"
-            style={{ backgroundColor: 'var(--color-mission-accent)', color: '#000' }}
-          >
-            Mở Brevo Cloud <ExternalLink size={14} />
-          </a>
-        </div>
       </section>
 
       {/* Env footer */}
