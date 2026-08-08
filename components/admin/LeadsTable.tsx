@@ -450,7 +450,11 @@ const LeadsTable: React.FC = () => {
                 </td>
               </tr>
             ) : filtered.map(lead => (
-              <tr key={lead.id} className="border-b border-gray-800 hover:bg-gray-800/40 transition-colors">
+              <tr
+                key={lead.id}
+                className="border-b border-gray-800 hover:bg-gray-800/40 transition-colors cursor-pointer"
+                onClick={() => setSelectedLead(lead)}
+              >
                 <td className="px-4 py-3">
                   <p className="text-sm font-medium text-white">{lead.name}</p>
                   <p className="text-xs text-gray-500">{lead.email}</p>
@@ -506,7 +510,7 @@ const LeadsTable: React.FC = () => {
                   </div>
                 </td>
                 <td className="px-4 py-3 text-xs text-gray-500">{format(new Date(lead.created_at), 'dd/MM/yy')}</td>
-                <td className="px-4 py-3">
+                <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
                   <div className="flex items-center gap-1">
                     <button
                       onClick={() => openQuickAction(lead, 'call')}
