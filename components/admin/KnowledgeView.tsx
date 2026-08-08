@@ -418,6 +418,12 @@ const KBDetail: React.FC<{ kb: KB; onReload: () => void; onDelete: () => void }>
 
 // ─── Create KB modal ─────────────────────────────────────────────────────────
 
+interface EmbeddingProviderChoice {
+  id: string; label: string
+  embedding_model: string; embedding_dim: number
+  connected: boolean; status: string; docs_url: string
+}
+
 const CreateKbModal: React.FC<{ onClose: () => void; onCreated: (kb: KB) => void }> = ({ onClose, onCreated }) => {
   const [name, setName] = useState('')
   const [slug, setSlug] = useState('')
@@ -425,13 +431,30 @@ const CreateKbModal: React.FC<{ onClose: () => void; onCreated: (kb: KB) => void
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // For MVP: fixed to openai + 1536-dim. Show it read-only.
-  const provider = 'openai'
-  const model = 'text-embedding-3-small'
-  const dim = 1536
+  // Load eligible embedding providers (from registry, annotated with connected status)
+  const [providers, setProviders] = useState<EmbeddingProviderChoice[]>([])
+  const [providerId, setProviderId] = useState<string>('openai')
+
+  useEffect(() => {
+    api<{ providers: EmbeddingProviderChoice[] }>('/api/knowledge?action=embedding-providers')
+      .then(r => {
+        setProviders(r.providers)
+        // Prefer first connected one; else openai default
+        const firstConnected = r.providers.find(p => p.connected)
+        if (firstConnected) setProviderId(firstConnected.id)
+      })
+      .catch(() => setProviders([]))
+  }, [])
+
+  const selected = providers.find(p => p.id === providerId)
 
   const handleSave = async () => {
     if (!name.trim()) { setError('Tên KB bắt buộc'); return }
+    if (!selected) { setError('Chưa chọn embedding provider'); return }
+    if (!selected.connected) {
+      setError(`Provider "${selected.label}" chưa kết nối. Vào Cài đặt → AI Providers trước.`)
+      return
+    }
     setSaving(true); setError(null)
     try {
       const r = await api<{ knowledge_base: KB }>('/api/knowledge', {
@@ -440,9 +463,9 @@ const CreateKbModal: React.FC<{ onClose: () => void; onCreated: (kb: KB) => void
           name: name.trim(),
           slug: slug.trim() || undefined,
           description: description.trim() || undefined,
-          embedding_provider: provider,
-          embedding_model: model,
-          embedding_dim: dim,
+          embedding_provider: selected.id,
+          embedding_model: selected.embedding_model,
+          embedding_dim: selected.embedding_dim,
         }),
       })
       onCreated(r.knowledge_base)
@@ -458,7 +481,7 @@ const CreateKbModal: React.FC<{ onClose: () => void; onCreated: (kb: KB) => void
             className="w-full px-3 py-2 rounded bg-neutral-900 border border-neutral-800 text-sm text-white focus:border-neutral-600 outline-none" />
         </Field>
         <Field label="Slug (URL-friendly, tự sinh nếu trống)">
-          <input value={slug} onChange={e => setSlug(e.target.value)} placeholder="vd-trợ-lý-ban-khoa-hoc-ai (tự chuyển kebab-case)"
+          <input value={slug} onChange={e => setSlug(e.target.value)} placeholder="vd-tro-ly-ban-khoa-hoc-ai"
             className="w-full px-3 py-2 rounded bg-neutral-900 border border-neutral-800 text-sm text-white font-mono focus:border-neutral-600 outline-none" />
         </Field>
         <Field label="Mô tả">
@@ -467,18 +490,43 @@ const CreateKbModal: React.FC<{ onClose: () => void; onCreated: (kb: KB) => void
             placeholder="Ngắn gọn KB này dùng để làm gì" />
         </Field>
 
-        <div className="rounded-lg border border-neutral-800 bg-neutral-900/50 p-3 text-xs text-neutral-500">
-          <div className="font-medium text-neutral-300 mb-1">Cấu hình embedding (MVP fixed)</div>
-          Provider: <span className="text-neutral-300 font-mono">{provider}</span> · Model: <span className="text-neutral-300 font-mono">{model}</span> · Dim: <span className="text-neutral-300 font-mono">{dim}</span>
-          <div className="mt-1 text-neutral-600">Cần có OpenAI provider đã kết nối trong Cài đặt → AI Providers.</div>
-        </div>
+        <Field label="Embedding provider">
+          {providers.length === 0 ? (
+            <div className="text-xs text-neutral-500 px-3 py-2 rounded bg-neutral-900 border border-neutral-800">
+              Đang tải danh sách provider...
+            </div>
+          ) : (
+            <>
+              <select value={providerId} onChange={e => setProviderId(e.target.value)}
+                className="w-full px-3 py-2 rounded bg-neutral-900 border border-neutral-800 text-sm text-white focus:border-neutral-600 outline-none">
+                {providers.map(p => (
+                  <option key={p.id} value={p.id} disabled={!p.connected}>
+                    {p.label} · {p.embedding_dim}d {p.connected ? '' : '(chưa kết nối)'}
+                  </option>
+                ))}
+              </select>
+              {selected && (
+                <div className="mt-1.5 text-[11px] text-neutral-500 flex items-center gap-2">
+                  <span>Model: <code className="text-neutral-400">{selected.embedding_model}</code></span>
+                  {!selected.connected && (
+                    <a href={selected.docs_url} target="_blank" rel="noopener noreferrer"
+                       className="text-amber-400 hover:underline">Lấy API key →</a>
+                  )}
+                </div>
+              )}
+              <p className="mt-1 text-[11px] text-neutral-600">
+                Đổi provider = KB mới hoàn toàn. Không thể đổi sau khi tạo (mỗi KB gắn 1 dim).
+              </p>
+            </>
+          )}
+        </Field>
 
         {error && <div className="text-xs text-red-400 flex items-center gap-1"><AlertCircle size={12} /> {error}</div>}
       </div>
 
       <div className="flex items-center justify-end gap-2 mt-5">
         <button onClick={onClose} className="text-sm px-3 py-1.5 rounded border border-neutral-800 text-neutral-400 hover:border-neutral-600">Huỷ</button>
-        <button onClick={handleSave} disabled={saving} className="text-sm px-3 py-1.5 rounded bg-white text-black font-medium hover:bg-neutral-200 disabled:opacity-50 flex items-center gap-1.5">
+        <button onClick={handleSave} disabled={saving || !selected?.connected} className="text-sm px-3 py-1.5 rounded bg-white text-black font-medium hover:bg-neutral-200 disabled:opacity-50 flex items-center gap-1.5">
           {saving && <Loader2 size={12} className="animate-spin" />}
           <Save size={12} /> Tạo KB
         </button>
@@ -603,77 +651,80 @@ const EntryEditor: React.FC<{
 // ─── Distill modal (Karpathy ingestion) ──────────────────────────────────────
 
 const DistillModal: React.FC<{ kbId: string; onClose: () => void; onDone: () => void }> = ({ kbId, onClose, onDone }) => {
-  const [tab, setTab] = useState<'paste' | 'url' | 'file'>('paste')
+  const [tab, setTab] = useState<'paste' | 'url' | 'pdf' | 'image'>('paste')
   const [text, setText] = useState('')
   const [url, setUrl] = useState('')
+  const [fileB64, setFileB64] = useState('')
+  const [fileName, setFileName] = useState('')
+  const [fileMime, setFileMime] = useState('')
   const [productHint, setProductHint] = useState('')
-  const [status, setStatus] = useState<'idle' | 'fetching' | 'distilling' | 'done'>('idle')
+  const [status, setStatus] = useState<'idle' | 'uploading' | 'ingesting' | 'done'>('idle')
   const [error, setError] = useState<string | null>(null)
-  const [result, setResult] = useState<{ entries_created: number; entries: any[]; embed_errors?: any[]; warning?: string } | null>(null)
+  const [result, setResult] = useState<{ entries_created: number; entry_ids: string[]; distill_notes?: string } | null>(null)
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>, kind: 'pdf' | 'image') => {
     const file = e.target.files?.[0]
     if (!file) return
-    if (!/\.(md|txt|markdown)$/i.test(file.name)) {
-      // TODO: support PDF via pdf-parse (server-side) — MVP: .md / .txt only
-      setError('Chỉ hỗ trợ .md / .txt / .markdown ở MVP. PDF sẽ thêm sau.')
+    setError(null)
+    // Size guard: 15MB — Vercel/api body limit is 20MB
+    if (file.size > 15 * 1024 * 1024) {
+      setError(`File quá lớn (${(file.size / 1024 / 1024).toFixed(1)}MB). Tối đa 15MB.`)
       return
     }
-    const t = await file.text()
-    setText(t)
-    setTab('paste')
-  }
-
-  const scrapeUrl = async (u: string): Promise<string> => {
-    // Client-side fetch — dev only. For production the browser CORS will block many sites,
-    // so this is a best-effort. If it fails, user pastes manually.
-    const res = await fetch(u, { method: 'GET', mode: 'cors' })
-    if (!res.ok) throw new Error(`Fetch URL HTTP ${res.status}`)
-    const html = await res.text()
-    // Strip scripts/styles, then tags, then collapse whitespace.
-    let s = html
-      .replace(/<script[\s\S]*?<\/script>/gi, ' ')
-      .replace(/<style[\s\S]*?<\/style>/gi, ' ')
-      .replace(/<!--[\s\S]*?-->/g, ' ')
-      .replace(/<[^>]+>/g, ' ')
-      .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'")
-      .replace(/\s+/g, ' ').trim()
-    return s
-  }
-
-  const handleDistill = async () => {
-    setError(null); setResult(null)
-    let raw = text
-    let source_ref: any = null
-    let source_kind = 'distilled'
-
-    if (tab === 'url') {
-      if (!url.trim()) { setError('Nhập URL'); return }
-      setStatus('fetching')
-      try {
-        raw = await scrapeUrl(url.trim())
-        source_ref = { kind: 'url', url: url.trim() }
-        source_kind = 'imported'
-        if (raw.length < 200) { setStatus('idle'); setError(`URL trả về quá ít text (${raw.length} chars). Trang có thể block CORS hoặc render bằng JS. Paste thẳng nội dung vào tab "Paste text".`); return }
-      } catch (e: any) {
-        setStatus('idle')
-        setError(`Fetch URL thất bại: ${e.message}. Có thể do CORS. Paste thẳng nội dung vào tab "Paste text".`)
-        return
-      }
+    // Basic MIME check
+    if (kind === 'pdf' && !/pdf/i.test(file.type) && !/\.pdf$/i.test(file.name)) {
+      setError('File không phải PDF.')
+      return
     }
+    if (kind === 'image' && !file.type.startsWith('image/')) {
+      setError('File không phải ảnh.')
+      return
+    }
+    setStatus('uploading')
+    // Read as base64 data URL
+    const b64 = await new Promise<string>((resolve, reject) => {
+      const r = new FileReader()
+      r.onload = () => resolve(String(r.result || ''))
+      r.onerror = () => reject(new Error('Read file failed'))
+      r.readAsDataURL(file)
+    })
+    setFileB64(b64)
+    setFileName(file.name)
+    setFileMime(file.type || (kind === 'pdf' ? 'application/pdf' : 'image/jpeg'))
+    setStatus('idle')
+  }
 
-    if (!raw.trim()) { setError('Nội dung rỗng'); return }
-    setStatus('distilling')
+  const handleIngest = async () => {
+    setError(null); setResult(null)
+    const payload: any = { source_ref: null }
+    if (tab === 'paste') {
+      if (!text.trim()) { setError('Nội dung rỗng'); return }
+      payload.kind = 'text'
+      payload.text = text
+    } else if (tab === 'url') {
+      if (!url.trim()) { setError('Nhập URL'); return }
+      payload.kind = 'url'
+      payload.url = url.trim()
+    } else if (tab === 'pdf') {
+      if (!fileB64) { setError('Chọn file PDF trước'); return }
+      payload.kind = 'pdf'
+      payload.file_base64 = fileB64
+      payload.mime_type = 'application/pdf'
+      payload.source_ref = { kind: 'pdf', filename: fileName }
+    } else if (tab === 'image') {
+      if (!fileB64) { setError('Chọn ảnh trước'); return }
+      payload.kind = 'image'
+      payload.file_base64 = fileB64
+      payload.mime_type = fileMime
+      payload.source_ref = { kind: 'image', filename: fileName }
+    }
+    if (productHint.trim()) payload.product_hint = productHint.trim()
+
+    setStatus('ingesting')
     try {
-      const r = await api<any>('/api/knowledge/distill', {
+      const r = await api<any>(`/api/knowledge/ingest?kb_id=${encodeURIComponent(kbId)}`, {
         method: 'POST',
-        body: JSON.stringify({
-          kb_id: kbId,
-          raw_text: raw,
-          source_kind,
-          source_ref,
-          product_hint: productHint || undefined,
-        }),
+        body: JSON.stringify(payload),
       })
       setResult(r)
       setStatus('done')
@@ -683,20 +734,21 @@ const DistillModal: React.FC<{ kbId: string; onClose: () => void; onDone: () => 
     }
   }
 
-  const busy = status === 'fetching' || status === 'distilling'
+  const busy = status === 'uploading' || status === 'ingesting'
 
   return (
-    <ModalShell title="Distill nội dung thô thành KB entries" onClose={onClose} wide>
-      {/* Tabs */}
-      <div className="flex items-center gap-1 border-b border-neutral-800 mb-3">
+    <ModalShell title="Nhập nội dung vào KB (tự distill + embed)" onClose={onClose} wide>
+      {/* Tabs — 4 input modes, all pipe through /api/knowledge/ingest (raw file never persisted) */}
+      <div className="flex items-center gap-1 border-b border-neutral-800 mb-3 flex-wrap">
         {[
           { id: 'paste', label: 'Paste text' },
-          { id: 'url',   label: 'URL scrape' },
-          { id: 'file',  label: 'Upload file' },
+          { id: 'url',   label: 'URL' },
+          { id: 'pdf',   label: 'PDF' },
+          { id: 'image', label: 'Ảnh (OCR)' },
         ].map(t => (
           <button
             key={t.id}
-            onClick={() => setTab(t.id as any)}
+            onClick={() => { setTab(t.id as any); setError(null); setFileB64(''); setFileName('') }}
             className={`px-3 py-2 text-xs font-medium border-b-2 -mb-px transition-colors ${
               tab === t.id ? 'text-white border-white' : 'text-neutral-500 border-transparent hover:text-neutral-300'
             }`}
@@ -707,26 +759,16 @@ const DistillModal: React.FC<{ kbId: string; onClose: () => void; onDone: () => 
       {result ? (
         <div className="space-y-3">
           <div className="rounded-lg border border-green-900 bg-green-950/30 text-green-300 text-sm px-4 py-3 flex items-center gap-2">
-            <CheckCircle2 size={16} /> Đã distill {result.entries_created} entries
-            {result.warning && <span className="text-yellow-400 ml-2">({result.warning})</span>}
+            <CheckCircle2 size={16} /> Đã tạo {result.entries_created} entries {result.distill_notes && <span className="text-neutral-400">· {result.distill_notes}</span>}
           </div>
-          {result.embed_errors && result.embed_errors.length > 0 && (
-            <div className="rounded-lg border border-yellow-900 bg-yellow-950/30 text-yellow-300 text-xs px-4 py-3">
-              {result.embed_errors.length} entry embed lỗi — vào tab entry bấm Re-embed.
-            </div>
-          )}
-          <ul className="rounded-lg border border-neutral-800 divide-y divide-neutral-900">
-            {(result.entries || []).map((e: any) => (
-              <li key={e.id} className="px-4 py-3 flex items-center gap-3">
-                <FileText size={14} className="text-neutral-500 shrink-0" />
-                <div className="min-w-0 flex-1">
-                  <div className="text-sm text-white truncate">{e.title}</div>
-                  <div className="text-[11px] text-neutral-500 truncate font-mono">{e.filename} · {e.chunks_created ?? 0} chunks</div>
-                </div>
-              </li>
-            ))}
-          </ul>
+          <div className="text-xs text-neutral-500">
+            {result.entry_ids.length} entry_id: <code className="text-neutral-400">{result.entry_ids.slice(0, 3).join(', ')}{result.entry_ids.length > 3 ? '...' : ''}</code>
+          </div>
           <div className="flex items-center justify-end gap-2">
+            <button onClick={() => { setResult(null); setText(''); setUrl(''); setFileB64(''); setFileName('') }}
+              className="text-sm px-3 py-1.5 rounded border border-neutral-800 text-neutral-400 hover:border-neutral-600">
+              Nhập thêm
+            </button>
             <button onClick={onDone} className="text-sm px-3 py-1.5 rounded bg-white text-black font-medium">Xong</button>
           </div>
         </div>
@@ -741,30 +783,46 @@ const DistillModal: React.FC<{ kbId: string; onClose: () => void; onDone: () => 
           )}
 
           {tab === 'url' && (
-            <>
-              <Field label="URL">
-                <input value={url} onChange={e => setUrl(e.target.value)} placeholder="https://..."
-                  className="w-full px-3 py-2 rounded bg-neutral-900 border border-neutral-800 text-sm text-white font-mono focus:border-neutral-600 outline-none" />
-                <div className="text-[10px] text-neutral-600 mt-1">
-                  Fetch từ browser — nhiều trang sẽ block CORS. Nếu fail thì copy text vào tab "Paste text".
-                </div>
-              </Field>
-            </>
+            <Field label="URL bài viết / trang web">
+              <input value={url} onChange={e => setUrl(e.target.value)} placeholder="https://..."
+                className="w-full px-3 py-2 rounded bg-neutral-900 border border-neutral-800 text-sm text-white font-mono focus:border-neutral-600 outline-none" />
+              <div className="text-[10px] text-neutral-600 mt-1">
+                Server sẽ fetch + trích xuất bài viết chính (Readability). Content SPA (Vue/React render) có thể không lấy được.
+              </div>
+            </Field>
           )}
 
-          {tab === 'file' && (
+          {tab === 'pdf' && (
             <div className="rounded-lg border-2 border-dashed border-neutral-800 p-6 text-center">
-              <input
-                type="file"
-                accept=".md,.txt,.markdown"
-                onChange={handleFileUpload}
-                className="text-xs text-neutral-400"
-              />
-              <p className="text-[11px] text-neutral-600 mt-2">Hỗ trợ .md, .txt (MVP). PDF sẽ thêm sau.</p>
-              {text && (
-                <div className="mt-3 text-xs text-neutral-400 text-left">
-                  Đã đọc {text.length} chars. Nội dung sẽ được distill khi bấm nút bên dưới.
+              <input type="file" accept="application/pdf,.pdf"
+                onChange={e => handleFileUpload(e, 'pdf')}
+                className="text-xs text-neutral-400" />
+              {fileName ? (
+                <div className="mt-3 text-xs text-neutral-300">
+                  <FileText size={14} className="inline mr-1" /> {fileName}
+                  <div className="text-[10px] text-neutral-600 mt-1">Server sẽ trích text từ PDF, KHÔNG lưu file.</div>
                 </div>
+              ) : (
+                <p className="text-[11px] text-neutral-600 mt-2">Tối đa 15MB. File KHÔNG được lưu — chỉ text trích ra + KB entries.</p>
+              )}
+            </div>
+          )}
+
+          {tab === 'image' && (
+            <div className="rounded-lg border-2 border-dashed border-neutral-800 p-6 text-center">
+              <input type="file" accept="image/*"
+                onChange={e => handleFileUpload(e, 'image')}
+                className="text-xs text-neutral-400" />
+              {fileName ? (
+                <div className="mt-3 text-xs text-neutral-300">
+                  <FileText size={14} className="inline mr-1" /> {fileName}
+                  <div className="text-[10px] text-neutral-600 mt-1">Vision LLM sẽ OCR + mô tả visual (cần OpenAI hoặc Gemini kết nối).</div>
+                </div>
+              ) : (
+                <p className="text-[11px] text-neutral-600 mt-2">
+                  OCR + mô tả bằng vision LLM (GPT-4o hoặc Gemini). Cần kết nối 1 trong 2 trong Cài đặt → AI Providers.
+                  File KHÔNG được lưu.
+                </p>
               )}
             </div>
           )}
@@ -781,12 +839,12 @@ const DistillModal: React.FC<{ kbId: string; onClose: () => void; onDone: () => 
           <div className="flex items-center justify-end gap-2">
             <button onClick={onClose} className="text-sm px-3 py-1.5 rounded border border-neutral-800 text-neutral-400 hover:border-neutral-600">Huỷ</button>
             <button
-              onClick={handleDistill}
+              onClick={handleIngest}
               disabled={busy}
               className="text-sm px-3 py-1.5 rounded bg-white text-black font-medium hover:bg-neutral-200 disabled:opacity-50 flex items-center gap-1.5"
             >
               {busy && <Loader2 size={12} className="animate-spin" />}
-              <Sparkles size={12} /> {status === 'fetching' ? 'Đang fetch URL...' : status === 'distilling' ? 'Đang distill (~10-30s)...' : 'Distill + auto-save'}
+              <Sparkles size={12} /> {status === 'uploading' ? 'Đang đọc file...' : status === 'ingesting' ? 'Đang trích + distill (~15-45s)...' : 'Trích + Distill + Lưu'}
             </button>
           </div>
         </div>

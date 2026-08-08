@@ -47,8 +47,32 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const url = new URL(req.url || '', 'http://localhost')
   const id = url.searchParams.get('id') || ''
+  const action = url.searchParams.get('action') || ''
 
   try {
+    // ── ELIGIBLE EMBEDDING PROVIDERS (for the KB create picker) ──
+    // Returns registry providers with supports_embeddings=true, annotated with
+    // whether their credential is connected. UI uses this to render the dropdown
+    // (disabled + "Kết nối trước" hint for not-connected rows).
+    if (req.method === 'GET' && action === 'embedding-providers') {
+      const { AI_PROVIDERS } = await import('../../services/ai-providers')
+      const { data: creds } = await admin.from('provider_credentials')
+        .select('provider, status')
+      const credMap = new Map((creds || []).map(c => [c.provider, c.status]))
+      const items = Object.values(AI_PROVIDERS)
+        .filter(p => p.supports_embeddings)
+        .map(p => ({
+          id: p.id,
+          label: p.label,
+          embedding_model: p.embedding_model,
+          embedding_dim: p.embedding_dim,
+          connected: credMap.has(p.id),
+          status: credMap.get(p.id) || 'disconnected',
+          docs_url: p.docs_url,
+        }))
+      return res.json({ providers: items })
+    }
+
     // ── LIST ──
     if (req.method === 'GET') {
       const { data: kbs, error } = await admin.from('knowledge_bases')
@@ -90,11 +114,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (!name?.trim()) return res.status(400).json({ error: 'Tên KB bắt buộc' })
 
       const provider = embedding_provider || 'openai'
-      const model    = embedding_model    || 'text-embedding-3-small'
-      const dim      = embedding_dim      || 1536
-
-      if (dim !== 1536) {
-        return res.status(400).json({ error: `MVP chỉ hỗ trợ embedding 1536-dim (openai text-embedding-3-small / kimi moonshot-v1-embed). Bạn chọn ${dim}-dim.` })
+      // Look up provider registry for defaults + capability check
+      const { AI_PROVIDERS } = await import('../../services/ai-providers')
+      const providerCfg = AI_PROVIDERS[provider]
+      if (!providerCfg) {
+        return res.status(400).json({ error: `Provider "${provider}" không tồn tại trong registry.` })
+      }
+      if (!providerCfg.supports_embeddings) {
+        const eligible = Object.values(AI_PROVIDERS).filter(p => p.supports_embeddings).map(p => p.id).join(', ')
+        return res.status(400).json({ error: `Provider "${provider}" không hỗ trợ embeddings. Chọn 1 trong: ${eligible}.` })
+      }
+      const model = embedding_model || providerCfg.embedding_model!
+      const dim   = embedding_dim   || providerCfg.embedding_dim!
+      if (!model || !dim) {
+        return res.status(400).json({ error: `Provider "${provider}" thiếu embedding_model hoặc embedding_dim trong registry.` })
       }
 
       // Verify the credential is connected — better UX than "fetch failed" later

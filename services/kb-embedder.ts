@@ -6,12 +6,14 @@
  * Design notes:
  *   • Text is split on paragraph boundaries first, then packed into ~500-token windows
  *     (~2000 chars) with 100-token (~400 char) overlap so retrieval catches boundaries.
- *   • We only support 1536-dim providers (openai, kimi) for MVP because the pgvector
- *     column in migration 020 is `vector(1536)`. Non-1536 providers error out early.
+ *   • ANY provider with `supports_embeddings: true` in ai-providers.ts works — migration
+ *     026 loosened kb_chunks.embedding to variable-dim `vector`. Provider registry
+ *     declares dim per provider (OpenAI 1536, Kimi 1536, Gemini 768, Qwen 1024).
  *   • Provider credentials come from `provider_credentials` (same table as ai-router).
  *     We do NOT go through ai-router itself — that's a chat-completion path. Embeddings
- *     hit `${base_url}/embeddings` directly (OpenAI-compat), which every 1536-dim
- *     provider supports.
+ *     hit `${base_url}/embeddings` directly (OpenAI-compat), which most providers ship.
+ *   • Sanity check: whatever dim the API returns is the dim persisted onto the KB row.
+ *     Retrieval side (rag.ts) refuses to search cross-dim.
  */
 
 import { createClient } from '@supabase/supabase-js'
@@ -132,12 +134,6 @@ export async function chunkText(
  */
 export async function embedTexts(texts: string[], cfg: EmbedderConfig): Promise<number[][]> {
   if (!texts.length) return []
-  if (cfg.dim !== 1536) {
-    throw new Error(
-      `Provider "${cfg.provider}" trả embedding ${cfg.dim}-dim — cột kb_chunks.embedding là vector(1536). ` +
-      `MVP chỉ hỗ trợ 1536-dim (openai text-embedding-3-small, kimi moonshot-v1-embed).`
-    )
-  }
   const cred = await loadEmbedCred(cfg.provider)
 
   // Batch in groups of 96 to stay well under provider limits.

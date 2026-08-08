@@ -18,20 +18,24 @@ const EmailMarketingView = React.lazy(() => import('./EmailMarketingView'))
 const KnowledgeView = React.lazy(() => import('./KnowledgeView'))
 import NotificationCenter from './NotificationCenter'
 
+// Grouped semantically: business ops (customer journey) → content/marketing → admin.
 const NAV_ITEMS = [
-  { to: '/admin',          label: 'Tổng quan',      icon: LayoutDashboard, end: true },
-  { to: '/admin/leads',    label: 'Leads',          icon: List },
-  { to: '/admin/pipeline', label: 'Quy trình sale', icon: GitBranch },
-  { to: '/admin/orders',   label: 'Đơn hàng',       icon: ShoppingCart },
-  { to: '/admin/students', label: 'Khách hàng',     icon: Users },
-  { to: '/admin/products',   label: 'Sản phẩm',    icon: Package },
-  { to: '/admin/affiliates', label: 'Affiliate',    icon: Share2 },
-  { to: '/admin/ai-funnels', label: 'AI Funnels',   icon: Sparkles },
-  { to: '/admin/chat',     label: 'Chat',           icon: MessageCircle },
-  { to: '/admin/email',    label: 'Email',          icon: Mail },
-  { to: '/admin/knowledge', label: 'Kho kiến thức', icon: BookOpen },
-  { to: '/admin/tasks',    label: 'Tasks',          icon: CheckSquare },
-  { to: '/admin/settings', label: 'Cài đặt',        icon: Settings },
+  // ── Business operations (customer journey) ──
+  { to: '/admin',            label: 'Tổng quan',      icon: LayoutDashboard, end: true },
+  { to: '/admin/leads',      label: 'KHTN',           icon: List },
+  { to: '/admin/pipeline',   label: 'Quy trình sale', icon: GitBranch },
+  { to: '/admin/orders',     label: 'Đơn hàng',       icon: ShoppingCart },
+  { to: '/admin/students',   label: 'Khách hàng',     icon: Users },
+  // ── Content + marketing engine ──
+  { to: '/admin/ai-funnels', label: 'AI Funnels',     icon: Sparkles },
+  { to: '/admin/products',   label: 'Sản phẩm',       icon: Package },
+  { to: '/admin/knowledge',  label: 'Kho kiến thức',  icon: BookOpen },
+  { to: '/admin/chat',       label: 'Chat',           icon: MessageCircle },
+  { to: '/admin/email',      label: 'Email',          icon: Mail },
+  // ── Admin / management ──
+  { to: '/admin/tasks',      label: 'Tasks',          icon: CheckSquare },
+  { to: '/admin/affiliates', label: 'Affiliate',      icon: Share2 },
+  { to: '/admin/settings',   label: 'Cài đặt',        icon: Settings },
 ]
 
 const AdminLayout: React.FC = () => {
